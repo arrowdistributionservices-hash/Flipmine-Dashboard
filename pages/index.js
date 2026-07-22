@@ -52,7 +52,7 @@ export default function Home() {
   }
   if (!data) return <div style={{ padding: '40px 5vw', color: 'var(--muted)' }}>Loading live data…</div>;
 
-  const { sourcing, sales, generatedAt } = data;
+  const { sourcing, sales, purchasing, generatedAt } = data;
   const salesAccounts = Object.values(sales || {});
   const clientColor = (name) => SOURCER_COLORS[name] ? SOURCER_COLORS[name] : hashColor(name);
 
@@ -61,7 +61,7 @@ export default function Home() {
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" strategy="afterInteractive" onLoad={() => setChartReady(true)} />
       <GlobalNav />
       <div className="gsection" id="overview">
-        <Overview sourcing={sourcing} salesAccounts={salesAccounts} generatedAt={generatedAt} clientColor={clientColor} />
+        <Overview sourcing={sourcing} salesAccounts={salesAccounts} purchasing={purchasing} generatedAt={generatedAt} clientColor={clientColor} />
       </div>
       <hr className="gdivider" />
       <div className="gsection" id="sourcing">
@@ -90,7 +90,7 @@ function GlobalNav() {
   );
 }
 
-function Overview({ sourcing, salesAccounts, generatedAt, clientColor }) {
+function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColor }) {
   const totalSalesProfit = salesAccounts.reduce((a, r) => a + (r.profit || 0), 0);
   const totalSales = salesAccounts.reduce((a, r) => a + (r.sales || 0), 0);
   const losers = salesAccounts.filter(a => a.profit < 0).sort((a, b) => a.profit - b.profit);
@@ -169,6 +169,17 @@ function Overview({ sourcing, salesAccounts, generatedAt, clientColor }) {
       </section>
 
       <section>
+        <div className="section-head"><span className="section-title">Purchasing Breakdown</span><span className="section-desc">By brand, by day, by week</span></div>
+        <div className="grid-2 even">
+          <BrandBreakdownCard brands={sourcing.brand_breakdown || []} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <DailyPurchasingCard daily={(purchasing && purchasing.daily) || []} />
+            <WeeklyPurchasingCard weekly={(purchasing && purchasing.weekly) || []} />
+          </div>
+        </div>
+      </section>
+
+      <section>
         <div className="section-head"><span className="section-title">Sell-Side Snapshot</span><span className="section-desc">What&apos;s actually landed so far</span></div>
         {salesAccounts.length === 0 ? (
           <div className="card"><p style={{ color: 'var(--muted)' }}>No sell-side accounts uploaded yet. Go to <a href="/admin">/admin</a> to upload the first Sellerboard export.</p></div>
@@ -211,6 +222,96 @@ function Overview({ sourcing, salesAccounts, generatedAt, clientColor }) {
         <span>Internal — for Flipmine team use</span>
       </footer>
     </>
+  );
+}
+
+const BRAND_TILE_COLORS = { ARRIS: '#38c9b9', LEGO: '#f0b74a', Google: '#6d7ff9', Honeywell: '#b085f5' };
+
+function BrandBreakdownCard({ brands }) {
+  const maxProfit = Math.max(...brands.map(b => Math.abs(b.profit)), 1);
+  return (
+    <div className="card">
+      <h3>Purchases by brand</h3>
+      {brands.length === 0 ? (
+        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No branded deals matched yet (ARRIS, LEGO, Google, Honeywell).</p>
+      ) : (
+        <>
+          {brands.map(b => (
+            <div className="lb-row" key={b.brand}>
+              <div className="lb-name" style={{ color: BRAND_TILE_COLORS[b.brand] || '#ccc' }}>{b.brand}</div>
+              <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(4, (Math.abs(b.profit) / maxProfit) * 100)}%`, background: BRAND_TILE_COLORS[b.brand] || '#ccc' }} /></div>
+              <div className="lb-profit">{fmtMoney(b.profit)}</div>
+              <div className="lb-roi">{fmtPct(b.roi)}</div>
+            </div>
+          ))}
+          <table style={{ marginTop: 14 }}>
+            <thead><tr><th>Brand</th><th className="num">Deals</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
+            <tbody>
+              {brands.map(b => (
+                <tr key={b.brand}>
+                  <td style={{ color: BRAND_TILE_COLORS[b.brand] || '#ccc', fontWeight: 600 }}>{b.brand}</td>
+                  <td className="num">{b.n}</td>
+                  <td className="num">{fmtMoney(b.cost)}</td>
+                  <td className="num">{fmtMoney(b.profit)}</td>
+                  <td className="num roi-cell">{fmtPct(b.roi)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DailyPurchasingCard({ daily }) {
+  const last7 = daily.slice(-7);
+  return (
+    <div className="card">
+      <h3>Daily purchasing — last {last7.length || 7} days</h3>
+      {last7.length === 0 ? (
+        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No daily data available from the sheet yet.</p>
+      ) : (
+        <table>
+          <thead><tr><th>Date</th><th className="num">Purchasing</th><th className="num">Est. Profit</th><th className="num">Est. ROI</th></tr></thead>
+          <tbody>
+            {last7.map((d, i) => (
+              <tr key={i}>
+                <td>{new Date(d.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</td>
+                <td className="num">{fmtMoney(d.purchasing)}</td>
+                <td className="num pos">{fmtMoney(d.profit)}</td>
+                <td className="num roi-cell">{d.roi !== null ? fmtPct(d.roi) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function WeeklyPurchasingCard({ weekly }) {
+  return (
+    <div className="card">
+      <h3>Weekly purchasing</h3>
+      {weekly.length === 0 ? (
+        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No weekly data available from the sheet yet.</p>
+      ) : (
+        <table>
+          <thead><tr><th>Week</th><th className="num">E2A &amp; E2W</th><th className="num">Wholesale</th><th className="num">Total</th></tr></thead>
+          <tbody>
+            {weekly.map((w, i) => (
+              <tr key={i}>
+                <td>{w.week}</td>
+                <td className="num">{w.e2aE2w !== null ? fmtMoney(w.e2aE2w) : '—'}</td>
+                <td className="num">{w.wholesale !== null ? fmtMoney(w.wholesale) : '—'}</td>
+                <td className="num roi-cell">{fmtMoney(w.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 
