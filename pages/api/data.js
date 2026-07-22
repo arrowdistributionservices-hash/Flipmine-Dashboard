@@ -11,14 +11,18 @@ function getKv() {
 }
 
 export default async function handler(req, res) {
+  const wantDebug = req.query.debug === '1';
+  const debugLog = wantDebug ? [] : null;
+
   let sourcing = { clients: [], global: { cost: 0, profit: 0, n: 0, roi: 0, corr_roi: 0 }, by_client: {}, sourcer_efficiency: {}, non_arris_outliers: [], total_count: 0 };
   let salesAccounts = {};
+  let sourcingError = null;
 
   try {
-    const records = await fetchAllSourcingRecords();
+    const records = await fetchAllSourcingRecords(debugLog);
     sourcing = buildSourcingDashboardData(records);
   } catch (e) {
-    // sourcing fetch failed (e.g. sheet not shared publicly yet) — keep the safe defaults above
+    sourcingError = String(e);
   }
 
   const kv = getKv();
@@ -30,6 +34,9 @@ export default async function handler(req, res) {
     }
   }
 
-  res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=300');
-  return res.status(200).json({ sourcing, sales: salesAccounts, generatedAt: new Date().toISOString() });
+  const payload = { sourcing, sales: salesAccounts, generatedAt: new Date().toISOString() };
+  if (wantDebug) { payload.debug = debugLog; payload.sourcingError = sourcingError; }
+
+  res.setHeader('Cache-Control', wantDebug ? 'no-store' : 's-maxage=120, stale-while-revalidate=300');
+  return res.status(200).json(payload);
 }
