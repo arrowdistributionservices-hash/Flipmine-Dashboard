@@ -5,7 +5,12 @@ import { detectFormat, summarizeAccount } from '../../lib/parse';
 import formidable from 'formidable';
 import fs from 'fs';
 
-const kv = Redis.fromEnv(); // reads UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+function getKv() {
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  return new Redis({ url, token });
+}
 
 export const config = { api: { bodyParser: false } };
 
@@ -33,6 +38,11 @@ export default async function handler(req, res) {
   const auth = req.headers['x-admin-token'];
   if (!auth || auth !== process.env.ADMIN_TOKEN) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const kv = getKv();
+  if (!kv) {
+    return res.status(500).json({ error: 'Database not configured', detail: 'KV_REST_API_URL/TOKEN env vars are missing on the server' });
   }
 
   const form = formidable({ multiples: false });

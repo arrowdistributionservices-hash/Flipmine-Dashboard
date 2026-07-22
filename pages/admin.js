@@ -20,7 +20,7 @@ export default function Admin() {
     try {
       const res = await fetch('/api/upload', { method: 'POST', headers: { 'x-admin-token': token }, body: fd });
       const j = await res.json();
-      if (!res.ok) throw new Error(j.error || 'Upload failed');
+      if (!res.ok) throw new Error((j.error || 'Upload failed') + (j.detail ? ` — ${j.detail}` : ''));
       setStatus({ ok: true, msg: `Saved: ${clientName} · ${marketplace} — Sales ${j.summary.sales}, Profit ${j.summary.profit}` });
       setFile(null);
     } catch (err) {
