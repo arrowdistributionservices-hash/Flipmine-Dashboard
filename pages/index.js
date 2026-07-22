@@ -228,7 +228,8 @@ function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColo
 const BRAND_TILE_COLORS = { ARRIS: '#38c9b9', LEGO: '#f0b74a', Google: '#6d7ff9', Honeywell: '#b085f5' };
 
 function BrandBreakdownCard({ brands }) {
-  const maxProfit = Math.max(...brands.map(b => Math.abs(b.profit)), 1);
+  const sortedByCost = [...brands].sort((a, b) => b.cost - a.cost);
+  const maxCost = Math.max(...sortedByCost.map(b => b.cost), 1);
   return (
     <div className="card">
       <h3>Purchases by brand</h3>
@@ -236,18 +237,18 @@ function BrandBreakdownCard({ brands }) {
         <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No branded deals matched yet (ARRIS, LEGO, Google, Honeywell).</p>
       ) : (
         <>
-          {brands.map(b => (
+          {sortedByCost.map(b => (
             <div className="lb-row" key={b.brand}>
               <div className="lb-name" style={{ color: BRAND_TILE_COLORS[b.brand] || '#ccc' }}>{b.brand}</div>
-              <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(4, (Math.abs(b.profit) / maxProfit) * 100)}%`, background: BRAND_TILE_COLORS[b.brand] || '#ccc' }} /></div>
-              <div className="lb-profit">{fmtMoney(b.profit)}</div>
-              <div className="lb-roi">{fmtPct(b.roi)}</div>
+              <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(4, (b.cost / maxCost) * 100)}%`, background: BRAND_TILE_COLORS[b.brand] || '#ccc' }} /></div>
+              <div className="lb-profit">{fmtMoney(b.cost)}</div>
+              <div className="lb-roi">{b.n} deals</div>
             </div>
           ))}
           <table style={{ marginTop: 14 }}>
             <thead><tr><th>Brand</th><th className="num">Deals</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
             <tbody>
-              {brands.map(b => (
+              {sortedByCost.map(b => (
                 <tr key={b.brand}>
                   <td style={{ color: BRAND_TILE_COLORS[b.brand] || '#ccc', fontWeight: 600 }}>{b.brand}</td>
                   <td className="num">{b.n}</td>
