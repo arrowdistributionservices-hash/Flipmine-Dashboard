@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import '../styles/globals.css';
 
 export default function Admin() {
   const [token, setToken] = useState('');

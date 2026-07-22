@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import '../styles/globals.css';
 
 function fmtMoney(v) { if (v === null || v === undefined || isNaN(v)) return '—'; return '$' + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtPct(v) { if (v === null || v === undefined || isNaN(v)) return '—'; return (v * 100).toFixed(1) + '%'; }
