@@ -9,10 +9,27 @@ export default function Home() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch('/api/data').then(r => r.json()).then(setData).catch(e => setError(String(e)));
+    fetch('/api/data')
+      .then(r => r.json().then(j => ({ ok: r.ok, body: j })))
+      .then(({ ok, body }) => {
+        if (!ok || !body || !body.sourcing) {
+          setError((body && (body.error || body.detail)) || 'Unexpected response from /api/data');
+          return;
+        }
+        setData(body);
+      })
+      .catch(e => setError(String(e)));
   }, []);
 
-  if (error) return <div className="wrap"><p style={{ color: 'var(--rose)' }}>Failed to load: {error}</p></div>;
+  if (error) return (
+    <div className="wrap">
+      <h1>Flipmine — Global Dashboard</h1>
+      <p style={{ color: 'var(--rose)' }}>Couldn't load live data yet: {error}</p>
+      <p style={{ color: 'var(--muted)', fontSize: 13 }}>
+        This is expected until the Google Sheet is shared publicly and the Redis database is connected (steps 1 and 4 in the README).
+      </p>
+    </div>
+  );
   if (!data) return <div className="wrap"><p>Loading live data from Google Sheets and stored sales accounts…</p></div>;
 
   const { sourcing, sales, generatedAt } = data;
