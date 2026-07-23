@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, Fragment } from 'react';
 import Script from 'next/script';
 
 function fmtMoney(v) {
@@ -173,7 +173,7 @@ function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColo
         <div className="grid-2 even">
           <BrandBreakdownCard brands={sourcing.brand_breakdown || []} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <DailyPurchasingCard daily={(purchasing && purchasing.daily) || []} />
+            <DailyPurchasingCard daily={(purchasing && purchasing.daily) || []} bySource={purchasing && purchasing.bySource} />
             <WeeklyPurchasingCard weekly={(purchasing && purchasing.weekly) || []} />
           </div>
         </div>
@@ -265,31 +265,64 @@ function BrandBreakdownCard({ brands }) {
   );
 }
 
-function DailyPurchasingCard({ daily }) {
+const SOURCE_LABELS = { Nabeel: 'Nabeel (LEGO)', Hasan: 'Hasan (LEGO)', Faqahat: 'Faqahat (ARRIS)', Google: 'Google Sourcing' };
+const SOURCE_ORDER = ['Nabeel', 'Hasan', 'Faqahat', 'Google'];
+
+function DailyPurchasingCard({ daily, bySource }) {
+  const [openDate, setOpenDate] = useState(null);
   const last7 = daily.slice(-7);
+
   return (
     <div className="card">
       <h3>Daily purchasing — last {last7.length || 7} days</h3>
       {last7.length === 0 ? (
         <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No daily data available from the sheet yet.</p>
       ) : (
-        <table>
-          <thead><tr><th>Date</th><th className="num">Purchasing</th><th className="num">Est. Profit</th><th className="num">Est. ROI</th></tr></thead>
-          <tbody>
-            {last7.map((d, i) => (
-              <tr key={i}>
-                <td>{new Date(d.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</td>
-                <td className="num">{fmtMoney(d.purchasing)}</td>
-                <td className="num pos">{fmtMoney(d.profit)}</td>
-                <td className="num roi-cell">{d.roi !== null ? fmtPct(d.roi) : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <table>
+            <thead><tr><th>Date</th><th className="num">Purchasing</th><th className="num">Est. Profit</th><th className="num">Est. ROI</th></tr></thead>
+            <tbody>
+              {last7.map((d, i) => (
+                <Fragment key={i}>
+                  <tr onClick={() => setOpenDate(openDate === d.date ? null : d.date)} style={{ cursor: 'pointer' }}>
+                    <td>{new Date(d.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} <span style={{ color: 'var(--muted)', fontSize: 10 }}>{openDate === d.date ? '▾' : '▸'}</span></td>
+                    <td className="num" style={{ textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'var(--muted)' }}>{fmtMoney(d.purchasing)}</td>
+                    <td className="num pos">{fmtMoney(d.profit)}</td>
+                    <td className="num roi-cell">{d.roi !== null ? fmtPct(d.roi) : '—'}</td>
+                  </tr>
+                  {openDate === d.date && (
+                    <tr>
+                      <td colSpan={4} style={{ background: '#10131c', padding: '10px 14px' }}>
+                        <div style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 10.5, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Breakdown by sourcing line — {new Date(d.date).toLocaleDateString()}
+                        </div>
+                        {SOURCE_ORDER.map(src => {
+                          const v = bySource && bySource[src] && bySource[src][d.date];
+                          if (!v) return null;
+                          return (
+                            <div key={src} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0' }}>
+                              <span style={{ color: SOURCER_COLORS[src] || clientColorFallback(src) }}>{SOURCE_LABELS[src]}</span>
+                              <span className="num">{fmtMoney(v.purchasing)}</span>
+                            </div>
+                          );
+                        })}
+                        {SOURCE_ORDER.every(src => !(bySource && bySource[src] && bySource[src][d.date])) && (
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>No per-source detail for this date.</div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>Click a date to see the per-sourcer split. Each line is single-brand: Nabeel &amp; Hasan source LEGO, Faqahat sources ARRIS, Google Sourcing covers Google/Nest.</p>
+        </>
       )}
     </div>
   );
 }
+function clientColorFallback(name) { return hashColor(name); }
 
 function WeeklyPurchasingCard({ weekly }) {
   return (
