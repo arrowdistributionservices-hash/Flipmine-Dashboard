@@ -29,7 +29,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    purchasingSummary = await fetchDailyPurchasingSummary();
+    purchasingSummary = await fetchDailyPurchasingSummary(wantDebug);
   } catch (e) {
     // leave purchasingSummary at empty default
   }
