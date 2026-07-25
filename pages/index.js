@@ -15,6 +15,13 @@ function fmtMoneyShort(v) {
 }
 function fmtPct(v) { if (v === null || v === undefined || isNaN(v)) return '—'; return (v * 100).toFixed(1) + '%'; }
 function fmtPctRaw(v) { if (v === null || v === undefined || isNaN(v)) return '—'; return v.toFixed(1) + '%'; }
+function parseUsDate(s) {
+  if (!s) return null;
+  const parts = String(s).split('/');
+  if (parts.length !== 3) return null;
+  const d = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
+  return isNaN(d.getTime()) ? null : d;
+}
 
 const PALETTE = ['#6d7ff9', '#38c9b9', '#f0b74a', '#b085f5', '#9c7bd6', '#5fa8d3', '#5fd39c', '#f36c7a', '#e0a458', '#7ad1e0'];
 function hashColor(name) {
@@ -170,12 +177,13 @@ function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColo
 
       <section>
         <div className="section-head"><span className="section-title">Purchasing Breakdown</span><span className="section-desc">By brand, by day, by week</span></div>
-        <div className="grid-2 even">
+        <div className="grid-2 even" style={{ marginBottom: 16 }}>
           <BrandBreakdownCard brands={sourcing.brand_breakdown || []} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <DailyPurchasingCard daily={(purchasing && purchasing.daily) || []} bySource={purchasing && purchasing.bySource} />
-            <WeeklyPurchasingCard weekly={(purchasing && purchasing.weekly) || []} />
-          </div>
+          <PurchasingSearchCard bySource={purchasing && purchasing.bySource} />
+        </div>
+        <div className="grid-2 even">
+          <DailyPurchasingCard daily={(purchasing && purchasing.daily) || []} bySource={purchasing && purchasing.bySource} />
+          <WeeklyPurchasingCard weekly={(purchasing && purchasing.weekly) || []} />
         </div>
       </section>
 
@@ -222,6 +230,95 @@ function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColo
         <span>Internal — for Flipmine team use</span>
       </footer>
     </>
+  );
+}
+
+const BRAND_SOURCE_MAP = { LEGO: ['Nabeel', 'Hasan'], ARRIS: ['Faqahat'], Google: ['Google'] };
+
+function PurchasingSearchCard({ bySource }) {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [selected, setSelected] = useState({ LEGO: true, ARRIS: true, Google: true });
+
+  const toggle = (brand) => setSelected(s => ({ ...s, [brand]: !s[brand] }));
+
+  const fromDate = from ? new Date(from + 'T00:00:00') : null;
+  const toDate = to ? new Date(to + 'T23:59:59') : null;
+
+  const inRange = (dateStr) => {
+    const d = parseUsDate(dateStr);
+    if (!d) return false;
+    if (fromDate && d < fromDate) return false;
+    if (toDate && d > toDate) return false;
+    return true;
+  };
+
+  const results = Object.entries(BRAND_SOURCE_MAP)
+    .filter(([brand]) => selected[brand])
+    .map(([brand, sources]) => {
+      let purchasing = 0, profit = 0;
+      sources.forEach(src => {
+        const bucket = (bySource && bySource[src]) || {};
+        Object.entries(bucket).forEach(([date, v]) => {
+          if (inRange(date)) { purchasing += v.purchasing; profit += v.profit || 0; }
+        });
+      });
+      const roi = purchasing ? profit / purchasing : null;
+      return { brand, purchasing, profit, roi };
+    });
+
+  const grand = results.reduce((a, r) => ({ purchasing: a.purchasing + r.purchasing, profit: a.profit + r.profit }), { purchasing: 0, profit: 0 });
+  const grandRoi = grand.purchasing ? grand.profit / grand.purchasing : null;
+  const hasRange = !!(from || to);
+
+  return (
+    <div className="card">
+      <h3>Search purchasing — by period &amp; brand</h3>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-end' }}>
+        <div className="form-row" style={{ marginBottom: 0, minWidth: 150 }}>
+          <label>From</label>
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)} />
+        </div>
+        <div className="form-row" style={{ marginBottom: 0, minWidth: 150 }}>
+          <label>To</label>
+          <input type="date" value={to} onChange={e => setTo(e.target.value)} />
+        </div>
+        {hasRange && (
+          <button className="btab" onClick={() => { setFrom(''); setTo(''); }} style={{ height: 38 }}>Clear</button>
+        )}
+      </div>
+      <div className="toggle-row" style={{ marginBottom: 18 }}>
+        {Object.keys(BRAND_SOURCE_MAP).map(brand => (
+          <div key={brand} className={`toggle-btn ${selected[brand] ? 'active' : ''}`} onClick={() => toggle(brand)}>{brand}</div>
+        ))}
+      </div>
+
+      {results.length === 0 ? (
+        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>Select at least one brand to see results.</p>
+      ) : (
+        <>
+          <div className="kpi-row" style={{ marginBottom: 16 }}>
+            <div className="kpi"><div className="kpi-label">Total Spend</div><div className="kpi-value">{fmtMoney(grand.purchasing)}</div><div className="kpi-sub">{hasRange ? 'selected period' : 'all time'}</div></div>
+            <div className="kpi"><div className="kpi-label">Est. Profit</div><div className="kpi-value teal">{fmtMoney(grand.profit)}</div></div>
+            <div className="kpi"><div className="kpi-label">Est. ROI</div><div className="kpi-value accent">{grandRoi !== null ? fmtPct(grandRoi) : '—'}</div></div>
+          </div>
+          <table>
+            <thead><tr><th>Brand</th><th className="num">Spend</th><th className="num">Est. Profit</th><th className="num">Est. ROI</th></tr></thead>
+            <tbody>
+              {results.map(r => (
+                <tr key={r.brand}>
+                  <td style={{ color: BRAND_TILE_COLORS[r.brand] || '#ccc', fontWeight: 600 }}>{r.brand}</td>
+                  <td className="num">{fmtMoney(r.purchasing)}</td>
+                  <td className="num pos">{fmtMoney(r.profit)}</td>
+                  <td className="num roi-cell">{r.roi !== null ? fmtPct(r.roi) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>Based on the sheet&apos;s per-day sourcing totals (LEGO = Nabeel + Hasan, ARRIS = Faqahat, Google = Google Sourcing). Leave dates blank to search all available history.</p>
+    </div>
   );
 }
 
