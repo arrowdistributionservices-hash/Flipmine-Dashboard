@@ -233,7 +233,7 @@ function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColo
   );
 }
 
-const BRAND_SOURCE_MAP = { LEGO: ['Nabeel', 'Hasan'], ARRIS: ['Faqahat'], Google: ['Google'] };
+const BRAND_SOURCE_MAP = { LEGO: ['Nabeel', 'Hasan'], ARRIS: ['Faqahat'], Google: ['Google'], Mattel: ['Mattel'], Hasbro: ['Hasbro'], 'Star Wars': ['StarWars'] };
 
 function PurchasingSearchCard({ bySource }) {
   const [from, setFrom] = useState('');
@@ -322,7 +322,7 @@ function PurchasingSearchCard({ bySource }) {
   );
 }
 
-const BRAND_TILE_COLORS = { ARRIS: '#38c9b9', LEGO: '#f0b74a', Google: '#6d7ff9', Honeywell: '#b085f5' };
+const BRAND_TILE_COLORS = { ARRIS: '#38c9b9', LEGO: '#f0b74a', Google: '#6d7ff9', Honeywell: '#b085f5', Mattel: '#f36c7a', Hasbro: '#e0a458', 'Star Wars': '#7ad1e0' };
 
 function BrandBreakdownCard({ brands }) {
   const sortedByCost = [...brands].sort((a, b) => b.cost - a.cost);
@@ -362,8 +362,8 @@ function BrandBreakdownCard({ brands }) {
   );
 }
 
-const SOURCE_LABELS = { Nabeel: 'Nabeel (LEGO)', Hasan: 'Hasan (LEGO)', Faqahat: 'Faqahat (ARRIS)', Google: 'Google Sourcing' };
-const SOURCE_ORDER = ['Nabeel', 'Hasan', 'Faqahat', 'Google'];
+const SOURCE_LABELS = { Nabeel: 'Nabeel (LEGO)', Hasan: 'Hasan (LEGO)', Faqahat: 'Faqahat (ARRIS)', Google: 'Google Sourcing', Mattel: 'Mattel', Hasbro: 'Hasbro', StarWars: 'Star Wars' };
+const SOURCE_ORDER = ['Nabeel', 'Hasan', 'Faqahat', 'Google', 'Mattel', 'Hasbro', 'StarWars'];
 
 function DailyPurchasingCard({ daily, bySource }) {
   const [openDate, setOpenDate] = useState(null);
@@ -413,7 +413,7 @@ function DailyPurchasingCard({ daily, bySource }) {
               ))}
             </tbody>
           </table>
-          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>Click a date to see the per-sourcer split. Each line is single-brand: Nabeel &amp; Hasan source LEGO, Faqahat sources ARRIS, Google Sourcing covers Google/Nest.</p>
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>Click a date to see the per-sourcer split. Nabeel &amp; Hasan source LEGO, Faqahat sources ARRIS, Google Sourcing covers Google/Nest, plus Mattel, Hasbro, and Star Wars lines.</p>
         </>
       )}
     </div>
