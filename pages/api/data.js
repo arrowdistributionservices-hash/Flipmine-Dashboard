@@ -13,6 +13,10 @@ function getKv() {
 }
 
 export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
   const wantDebug = req.query.debug === '1';
   const debugLog = wantDebug ? [] : null;
 
