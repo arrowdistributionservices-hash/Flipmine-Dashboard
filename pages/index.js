@@ -68,30 +68,53 @@ export default function Home() {
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" strategy="afterInteractive" onLoad={() => setChartReady(true)} />
       <GlobalNav />
       <div className="gsection" id="overview">
+        <SectionLabel n="01">Business Snapshot</SectionLabel>
         <Overview sourcing={sourcing} salesAccounts={salesAccounts} purchasing={purchasing} generatedAt={generatedAt} clientColor={clientColor} />
       </div>
       <hr className="gdivider" />
       <div className="gsection" id="sourcing">
-        <div className="gsection-label">Section 02 — Sourcing Pipeline (Deals Bought)</div>
+        <SectionLabel n="02">Sourcing Pipeline (Deals Bought)</SectionLabel>
         <SourcingPipeline sourcing={sourcing} mode={mode} setMode={setMode} breakdown={breakdown} setBreakdown={setBreakdown} chartReady={chartReady} clientColor={clientColor} />
       </div>
       <hr className="gdivider" />
       <div className="gsection" id="sales">
-        <div className="gsection-label">Section 03 — Sales &amp; Loss (Live Marketplace Performance)</div>
+        <SectionLabel n="03">Sales &amp; Loss (Live Marketplace Performance)</SectionLabel>
         <SalesLoss salesAccounts={salesAccounts} sourcing={sourcing} clientColor={clientColor} />
       </div>
     </>
   );
 }
 
+function SectionLabel({ n, children }) {
+  return <div className="gsection-label"><span className="n">{n}</span>{children}</div>;
+}
+
+const NAV_SECTIONS = ['overview', 'sourcing', 'sales'];
+
 function GlobalNav() {
+  const [active, setActive] = useState('overview');
+
+  useEffect(() => {
+    const els = NAV_SECTIONS.map(id => document.getElementById(id)).filter(Boolean);
+    if (!els.length) return;
+    const onScroll = () => {
+      const y = window.scrollY + 120;
+      let current = els[0].id;
+      for (const el of els) { if (el.offsetTop <= y) current = el.id; }
+      setActive(current);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
     <div className="gnav">
       <div className="gnav-inner">
         <span className="gnav-brand">FLIPMINE</span>
-        <a href="#overview">Overview</a>
-        <a href="#sourcing">Sourcing Pipeline</a>
-        <a href="#sales">Sales &amp; Loss</a>
+        <a href="#overview" className={active === 'overview' ? 'active' : ''}>Overview</a>
+        <a href="#sourcing" className={active === 'sourcing' ? 'active' : ''}>Sourcing Pipeline</a>
+        <a href="#sales" className={active === 'sales' ? 'active' : ''}>Sales &amp; Loss</a>
       </div>
     </div>
   );
@@ -140,38 +163,24 @@ function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColo
       </div>
 
       <section>
-        <div className="section-head"><span className="section-title">Client Leaderboard</span><span className="section-desc">Sourcing side — cost, profit, ROI</span></div>
-        <div className="grid-2">
-          <div className="card">
-            <h3>Profit by client</h3>
-            {clientsSorted.map(c => {
-              const d = sourcing.by_client[c];
-              return (
-                <div className="lb-row" key={c}>
-                  <div className="lb-name" style={{ color: clientColor(c) }}>{c}</div>
-                  <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(4, (d.profit / maxProfit) * 100)}%`, background: clientColor(c) }} /></div>
-                  <div className="lb-profit">{fmtMoney(d.profit)}</div>
-                  <div className="lb-roi">{fmtPct(d.roi)}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="card">
-            <h3>Sourcer efficiency</h3>
-            <table>
-              <thead><tr><th>Sourcer</th><th className="num">Deals</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
-              <tbody>
-                {sourcerRows.map(([s, d]) => (
-                  <tr key={s}><td style={{ color: SOURCER_COLORS[s] || '#ccc', fontWeight: 600 }}>{s}</td><td className="num">{d.n}</td><td className="num">{fmtMoney(d.profit)}</td><td className="num roi-cell">{fmtPct(d.roi)}</td></tr>
-                ))}
-              </tbody>
-            </table>
-            {sourcerRows.length > 1 && (
-              <div className="callout" style={{ marginTop: 14 }}>
-                {sourcerRows[0][0]} runs at the highest ROI ({fmtPct(sourcerRows[0][1].roi)}) across {sourcerRows[0][1].n} deals — worth understanding what makes that work and whether it can scale.
+        <div className="section-head"><span className="section-title">Client Leaderboard</span><a href="#sourcing" className="section-link">Full breakdown, per-client &amp; per-sourcer →</a></div>
+        <div className="card">
+          {clientsSorted.slice(0, 2).map(c => {
+            const d = sourcing.by_client[c];
+            return (
+              <div className="lb-row" key={c}>
+                <div className="lb-name" style={{ color: clientColor(c) }}>{c}</div>
+                <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(4, (d.profit / maxProfit) * 100)}%`, background: clientColor(c) }} /></div>
+                <div className="lb-profit">{fmtMoney(d.profit)}</div>
+                <div className="lb-roi">{fmtPct(d.roi)}</div>
               </div>
-            )}
-          </div>
+            );
+          })}
+          {sourcerRows.length > 1 && (
+            <div className="callout" style={{ marginTop: clientsSorted.length ? 14 : 0 }}>
+              Top client is <b style={{ color: clientColor(clientsSorted[0]) }}>{clientsSorted[0]}</b> at {fmtMoney(sourcing.by_client[clientsSorted[0]].profit)} profit. Top sourcer is <b>{sourcerRows[0][0]}</b>, running {fmtPct(sourcerRows[0][1].roi)} ROI across {sourcerRows[0][1].n} deals.
+            </div>
+          )}
         </div>
       </section>
 
@@ -188,39 +197,18 @@ function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColo
       </section>
 
       <section>
-        <div className="section-head"><span className="section-title">Sell-Side Snapshot</span><span className="section-desc">What&apos;s actually landed so far</span></div>
+        <div className="section-head"><span className="section-title">Sell-Side Snapshot</span><a href="#sales" className="section-link">Per-account detail, top &amp; bottom SKUs →</a></div>
         {salesAccounts.length === 0 ? (
           <div className="card"><p style={{ color: 'var(--muted)' }}>No sell-side accounts uploaded yet. Go to <a href="/admin">/admin</a> to upload the first Sellerboard export.</p></div>
         ) : (
-          <div className="grid-2">
-            <div className="card">
-              <h3>All accounts, ranked by net profit</h3>
-              <table>
-                <thead><tr><th>Account</th><th className="num">Sales</th><th className="num">Profit</th><th className="num">Margin</th></tr></thead>
-                <tbody>
-                  {rankedAccounts.map(a => (
-                    <tr key={`${a.client}|${a.marketplace}`}>
-                      <td style={{ color: clientColor(a.client), fontWeight: 600 }}>{a.client} · {a.marketplace}</td>
-                      <td className="num">{fmtMoney(a.sales)}</td>
-                      <td className={`num ${a.profit < 0 ? 'neg' : 'roi-cell'}`}>{fmtMoney(a.profit)}</td>
-                      <td className="num">{fmtPctRaw(a.margin)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="card">
-              <h3>Coverage — 13 managed accounts</h3>
-              <div className="coverage-grid">
-                {rankedAccounts.map(a => (
-                  <div className="tile live" key={`${a.client}|${a.marketplace}`} style={{ background: clientColor(a.client) }} title={`${a.client} — ${a.marketplace}`}>
-                    {a.client.slice(0, 3).toUpperCase()}
-                  </div>
-                ))}
-                {Array.from({ length: Math.max(0, 13 - rankedAccounts.length) }).map((_, i) => <div className="tile" key={i}>·</div>)}
-              </div>
-              <p style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 12 }}>{rankedAccounts.length} of 13 accounts loaded.</p>
-            </div>
+          <div className="card">
+            <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>
+              Best account: <b style={{ color: clientColor(rankedAccounts[0].client) }}>{rankedAccounts[0].client} · {rankedAccounts[0].marketplace}</b> at {fmtMoney(rankedAccounts[0].profit)}.
+              {rankedAccounts.length > 1 && rankedAccounts[rankedAccounts.length - 1].profit < 0 && (
+                <> Weakest: <b style={{ color: clientColor(rankedAccounts[rankedAccounts.length - 1].client) }}>{rankedAccounts[rankedAccounts.length - 1].client} · {rankedAccounts[rankedAccounts.length - 1].marketplace}</b> at {fmtMoney(rankedAccounts[rankedAccounts.length - 1].profit)}.</>
+              )}
+              {' '}{rankedAccounts.length} of 13 managed accounts loaded.
+            </p>
           </div>
         )}
       </section>
