@@ -23,13 +23,13 @@ function parseUsDate(s) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-const PALETTE = ['#6d7ff9', '#38c9b9', '#f0b74a', '#b085f5', '#9c7bd6', '#5fa8d3', '#5fd39c', '#f36c7a', '#e0a458', '#7ad1e0'];
+const PALETTE = ['#4d7cff', '#00e0a8', '#ffb020', '#e264ff', '#ff4d6d', '#22d3ee', '#facc15', '#fb923c', '#a78bfa', '#34d399'];
 function hashColor(name) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return PALETTE[h % PALETTE.length];
 }
-const SOURCER_COLORS = { Hasan: '#6d7ff9', Nabeel: '#b085f5', Faqahat: '#38c9b9', 'Scraper/Automated': '#8991a8' };
+const SOURCER_COLORS = { Hasan: '#4d7cff', Nabeel: '#e264ff', Faqahat: '#00e0a8', 'Scraper/Automated': '#8b91a5' };
 
 export default function Home() {
   const [data, setData] = useState(null);
@@ -310,7 +310,7 @@ function PurchasingSearchCard({ bySource }) {
   );
 }
 
-const BRAND_TILE_COLORS = { ARRIS: '#38c9b9', LEGO: '#f0b74a', Google: '#6d7ff9', Honeywell: '#b085f5', Mattel: '#f36c7a', Hasbro: '#e0a458', 'Star Wars': '#7ad1e0' };
+const BRAND_TILE_COLORS = { ARRIS: '#00e0a8', LEGO: '#ffb020', Google: '#4d7cff', Honeywell: '#e264ff', Mattel: '#ff4d6d', Hasbro: '#fb923c', 'Star Wars': '#22d3ee' };
 
 function BrandBreakdownCard({ brands }) {
   const sortedByCost = [...brands].sort((a, b) => b.cost - a.cost);
@@ -445,9 +445,9 @@ function SourcingPipeline({ sourcing, mode, setMode, breakdown, setBreakdown, ch
   useEffect(() => {
     if (!chartReady || typeof window === 'undefined' || !window.Chart) return;
     const Chart = window.Chart;
-    Chart.defaults.color = '#8991a8';
-    Chart.defaults.borderColor = '#262c3d';
-    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.color = '#8b91a5';
+    Chart.defaults.borderColor = '#262a38';
+    Chart.defaults.font.family = "'IBM Plex Sans', sans-serif";
 
     const labels = sourcing.clients;
     const profits = labels.map(c => val(sourcing.by_client[c], 'profit', 'corr_profit'));
@@ -460,7 +460,7 @@ function SourcingPipeline({ sourcing, mode, setMode, breakdown, setBreakdown, ch
         type: 'bar',
         data: { labels, datasets: [{ label: 'Profit ($)', data: profits, backgroundColor: bg, borderRadius: 6 }] },
         options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtMoney(ctx.raw) } } },
-          scales: { y: { ticks: { callback: v => '$' + v.toLocaleString() }, grid: { color: '#262c3d' } }, x: { grid: { display: false } } } }
+          scales: { y: { ticks: { callback: v => '$' + v.toLocaleString() }, grid: { color: '#262a38' } }, x: { grid: { display: false } } } }
       });
     }
 
@@ -470,7 +470,7 @@ function SourcingPipeline({ sourcing, mode, setMode, breakdown, setBreakdown, ch
         type: 'bar',
         data: { labels, datasets: [{ label: 'Avg ROI', data: rois, backgroundColor: bg, borderRadius: 6 }] },
         options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
-          scales: { y: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid: { color: '#262c3d' } }, x: { grid: { display: false } } } }
+          scales: { y: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid: { color: '#262a38' } }, x: { grid: { display: false } } } }
       });
     }
 
@@ -484,7 +484,7 @@ function SourcingPipeline({ sourcing, mode, setMode, breakdown, setBreakdown, ch
         type: 'bar',
         data: { labels: sourcers, datasets: [{ label: 'Avg ROI', data: srois, backgroundColor: sbg, borderRadius: 6 }] },
         options: { indexAxis: 'y', plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
-          scales: { x: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid: { color: '#262c3d' } }, y: { grid: { display: false } } } }
+          scales: { x: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid: { color: '#262a38' } }, y: { grid: { display: false } } } }
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
