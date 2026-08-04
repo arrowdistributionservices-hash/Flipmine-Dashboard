@@ -70,10 +70,59 @@ export default async function handler(req, res) {
       candidateSigHeaders,
       computedHmac, // compare this by eye against candidateSigHeaders once secret is set
     }));
-    await kv.ltrim('prepbrothers_raw_events', 0, 199);
+    // Raised from 200 - this is now a debugging aid, not the primary data
+    // source (see the stateful hashes below), but still useful for
+    // inspecting exactly what Prep Brothers sent.
+    await kv.ltrim('prepbrothers_raw_events', 0, 999);
   } catch (e) {
     console.error('Failed to log Prep Brothers webhook event', e);
     return res.status(500).json({ error: 'Failed to store event' });
+  }
+
+  // Maintain running state rather than relying on the event log to still
+  // contain the last update for a given item/shipment - a rolling list
+  // eventually evicts old entries, which would silently drop items/
+  // shipments that haven't changed recently from any "current totals"
+  // computed by scanning it. These hashes hold one current record per
+  // item/shipment, keyed by Prep Brothers' own id, updated in place.
+  try {
+    const data = parsedBody?.data;
+    if (eventType === 'item.stock_updated' && data?.id != null) {
+      await kv.hset('prepbrothers_item_stock', {
+        [data.id]: JSON.stringify({
+          itemId: data.id,
+          merchantSku: data.merchant_sku ?? null,
+          title: data.title ?? null,
+          quantityInStock: data.quantity_in_stock ?? null,
+          availableQuantity: data.available_quantity ?? null,
+          allocatedQuantity: data.allocated_quantity ?? null,
+          unavailableQuantity: data.unavailable_quantity ?? null,
+          inboundQuantity: data.inbound_quantity ?? null,
+          updatedAt: data.updated_at ?? receivedAt,
+        }),
+      });
+    } else if (eventType === 'inbound_shipment.received' && data?.id != null) {
+      await kv.hset('prepbrothers_shipments', {
+        [data.id]: JSON.stringify({
+          shipmentId: data.id,
+          name: data.name ?? null,
+          referenceId: data.reference_id ?? null,
+          status: data.status ?? null,
+          warehouseName: data.warehouse?.name ?? null,
+          shippedAt: data.shipped_at ?? null,
+          receivedAt: data.received_at ?? null,
+          checkedInAt: data.checked_in_at ?? null,
+          eta: data.eta ?? null,
+          notes: data.notes ?? null,
+          items: (data.actual_items || []).map((it) => ({ itemId: it.item_id, quantity: it.quantity })),
+          updatedAt: data.updated_at ?? receivedAt,
+        }),
+      });
+    }
+  } catch (e) {
+    // Don't fail the webhook over this - the raw event is already saved
+    // above and can be replayed/backfilled into these hashes later.
+    console.error('Failed to update Prep Brothers running state', e);
   }
 
   return res.status(200).json({ ok: true });
