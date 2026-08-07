@@ -122,8 +122,6 @@ function GlobalNav() {
 
 function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColor }) {
   const totalSalesProfit = salesAccounts.reduce((a, r) => a + (r.profit || 0), 0);
-  const totalSales = salesAccounts.reduce((a, r) => a + (r.sales || 0), 0);
-  const losers = salesAccounts.filter(a => a.profit < 0).sort((a, b) => a.profit - b.profit);
 
   const clientsSorted = [...sourcing.clients].sort((a, b) => sourcing.by_client[b].profit - sourcing.by_client[a].profit);
   const maxProfit = Math.max(...clientsSorted.map(c => sourcing.by_client[c].profit), 1);
@@ -141,18 +139,6 @@ function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColo
         </div>
         <div className="meta">UPDATED <b>{new Date(generatedAt).toLocaleString()}</b><br />SOURCING <b>Live — Google Sheets</b><br />SELL-SIDE <b>{salesAccounts.length} accounts loaded</b></div>
       </div>
-
-      {salesAccounts.length > 0 && (
-        <div className={`alert ${totalSalesProfit < 0 ? '' : 'good'}`}>
-          <div className="big">{fmtMoney(totalSalesProfit)}</div>
-          <div className="txt">
-            <b>{totalSalesProfit < 0 ? 'Combined net loss' : 'Combined net profit'} across all {salesAccounts.length} loaded accounts</b>, on {fmtMoney(totalSales)} in sales.
-            {losers.length > 0 && (
-              <p>{losers.slice(0, 2).map(l => `${l.client}'s ${l.marketplace} account (${fmtMoney(l.profit)})`).join(' and ')} {losers.length > 1 ? 'are' : 'is'} the main drag{losers.length > 1 ? 's' : ''} — see Sell-Side Snapshot below.</p>
-            )}
-          </div>
-        </div>
-      )}
 
       <div className="kpi-band">
         <div className="kpi"><div className="kpi-label">Deals Bought</div><div className="kpi-value">{sourcing.total_count.toLocaleString()}</div><div className="kpi-sub">across {sourcing.clients.length} sourcing clients</div></div>
