@@ -45,7 +45,22 @@ git push -u origin main
 2. Add `ADMIN_TOKEN` = some password only you and trusted team members know
 3. Redeploy for it to take effect
 
-## 6. (Optional) Confirm the sheet ID
+## 6. (Optional) Set up the Client Overage section
+
+Shows what a client actually paid Arrow for an item vs. the eBay cost (minus a $2/unit prep fee), matched by ASIN.
+Currently configured for Ursula only — see `CLIENT_PAYMENT_SHEETS` in `lib/clientPayments.js` to add more clients.
+
+1. Get a free Google Sheets API key: [console.cloud.google.com](https://console.cloud.google.com) → create/select a
+   project → **APIs & Services → Library** → enable **Google Sheets API** → **Credentials → Create Credentials → API key**.
+   (No service account or OAuth needed — this key only needs to *list* tabs on sheets that are already publicly viewable.)
+2. In Vercel: **Settings → Environment Variables** → add `GOOGLE_SHEETS_API_KEY` = that key → redeploy.
+3. Make sure each client's Purchase Order sheet is shared **Anyone with the link → Viewer** (same as the Flipmine
+   sheet in step 1) — the app needs to read it without logging in.
+
+Without this env var, the Overage section just shows a "not configured" message rather than breaking the rest of
+the dashboard.
+
+## 7. (Optional) Confirm the sheet ID
 
 The sourcing fetch defaults to the sheet ID already baked into `lib/sourcing.js`. If you ever copy this to
 a different sheet, add an environment variable `SOURCING_SHEET_ID` with the new sheet's ID instead of editing code.

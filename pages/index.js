@@ -81,6 +81,11 @@ export default function Home() {
         <SectionLabel n="03">Sales &amp; Loss (Live Marketplace Performance)</SectionLabel>
         <SalesLoss salesAccounts={salesAccounts} sourcing={sourcing} clientColor={clientColor} />
       </div>
+      <hr className="gdivider" />
+      <div className="gsection" id="overage">
+        <SectionLabel n="04">Client Overage (What They Paid vs. eBay Cost)</SectionLabel>
+        <Overage overage={data.overage} clientColor={clientColor} />
+      </div>
     </>
   );
 }
@@ -89,7 +94,7 @@ function SectionLabel({ n, children }) {
   return <div className="gsection-label"><span className="n">{n}</span>{children}</div>;
 }
 
-const NAV_SECTIONS = ['overview', 'sourcing', 'sales'];
+const NAV_SECTIONS = ['overview', 'sourcing', 'sales', 'overage'];
 
 function GlobalNav() {
   const [active, setActive] = useState('overview');
@@ -115,6 +120,7 @@ function GlobalNav() {
         <a href="#overview" className={active === 'overview' ? 'active' : ''}>Overview</a>
         <a href="#sourcing" className={active === 'sourcing' ? 'active' : ''}>Sourcing Pipeline</a>
         <a href="#sales" className={active === 'sales' ? 'active' : ''}>Sales &amp; Loss</a>
+        <a href="#overage" className={active === 'overage' ? 'active' : ''}>Overage</a>
       </div>
     </div>
   );
@@ -702,6 +708,55 @@ function SalesLoss({ salesAccounts, sourcing, clientColor }) {
       )}
 
       <footer>Sources: Sellerboard/ThreeColts uploads via /admin. Companion section: Sourcing Pipeline.</footer>
+    </>
+  );
+}
+
+function Overage({ overage, clientColor }) {
+  const o = overage || { enabled: false, clients: {} };
+
+  return (
+    <>
+      <h1>Flipmine — Client Overage</h1>
+      <div className="subtitle">
+        What a client paid Arrow for an item, minus the eBay cost, minus a $2/unit prep fee — matched item-by-item via ASIN.
+      </div>
+
+      {!o.enabled ? (
+        <div className="card">
+          <p style={{ color: 'var(--muted)' }}>
+            Overage isn&apos;t configured yet: {o.reason || 'no reason given'}. Add a <code>GOOGLE_SHEETS_API_KEY</code> environment
+            variable (see README) so this section can discover each client&apos;s Purchase Order sheet tabs.
+          </p>
+        </div>
+      ) : Object.keys(o.clients).length === 0 ? (
+        <div className="card"><p style={{ color: 'var(--muted)' }}>No clients configured for overage tracking yet.</p></div>
+      ) : (
+        Object.entries(o.clients).map(([client, c]) => (
+          <div className="client-block" key={client}>
+            <div className="client-head">
+              <div className="client-dot" style={{ background: clientColor(client) }} />
+              <div className="client-name" style={{ color: clientColor(client) }}>{client}</div>
+              <div className="client-sub">
+                {c.matchedAsinCount} of {c.totalEbayAsinCount} eBay-sourced products matched to their Purchase Order sheet
+              </div>
+            </div>
+
+            {c.fetchError ? (
+              <div className="pending">Couldn&apos;t load {client}&apos;s Purchase Order sheet: {c.fetchError}. Make sure it&apos;s shared &quot;Anyone with the link — Viewer&quot;.</div>
+            ) : (
+              <div className="kpi-row">
+                <div className="kpi"><div className="kpi-label">Client Paid</div><div className="kpi-value">{fmtMoney(c.matchedClientTotal)}</div><div className="kpi-sub">{c.matchedClientQty} units, matched items only</div></div>
+                <div className="kpi"><div className="kpi-label">eBay Cost</div><div className="kpi-value">{fmtMoney(c.matchedEbayCost)}</div><div className="kpi-sub">{c.matchedEbayQty} units bought</div></div>
+                <div className="kpi"><div className="kpi-label">Prep Fee</div><div className="kpi-value">{fmtMoney(c.prepFee)}</div><div className="kpi-sub">$2/unit × {c.matchedEbayQty}</div></div>
+                <div className="kpi"><div className="kpi-label">Overage</div><div className={`kpi-value ${c.overage < 0 ? 'rose' : 'teal'}`}>{fmtMoney(c.overage)}</div><div className="kpi-sub">paid − eBay cost − prep</div></div>
+              </div>
+            )}
+          </div>
+        ))
+      )}
+
+      <footer>Matched by ASIN between the Flipmine sourcing sheet and each client&apos;s Purchase Order sheet. Unmatched line items (sourced from other suppliers) are excluded.</footer>
     </>
   );
 }

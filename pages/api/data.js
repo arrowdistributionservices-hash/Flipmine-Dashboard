@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis';
 import { fetchAllSourcingRecords, buildSourcingDashboardData, fetchDailyPurchasingSummary } from '../../lib/sourcing';
+import { computeOverage } from '../../lib/clientPayments';
 
 function getKv() {
   try {
@@ -24,10 +25,16 @@ export default async function handler(req, res) {
   let salesAccounts = {};
   let purchasingSummary = { daily: [], weekly: [] };
   let sourcingError = null;
+  let overage = { enabled: false, clients: {} };
 
   try {
     const records = await fetchAllSourcingRecords(debugLog);
     sourcing = buildSourcingDashboardData(records);
+    try {
+      overage = await computeOverage(records, process.env.GOOGLE_SHEETS_API_KEY, debugLog);
+    } catch (e) {
+      overage = { enabled: false, reason: String(e), clients: {} };
+    }
   } catch (e) {
     sourcingError = String(e);
   }
@@ -47,7 +54,7 @@ export default async function handler(req, res) {
     }
   }
 
-  const payload = { sourcing, sales: salesAccounts, purchasing: purchasingSummary, generatedAt: new Date().toISOString() };
+  const payload = { sourcing, sales: salesAccounts, purchasing: purchasingSummary, overage, generatedAt: new Date().toISOString() };
   if (wantDebug) { payload.debug = debugLog; payload.sourcingError = sourcingError; }
 
   res.setHeader('Cache-Control', wantDebug ? 'no-store' : 's-maxage=120, stale-while-revalidate=300');
