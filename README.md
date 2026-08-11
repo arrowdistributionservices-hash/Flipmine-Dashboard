@@ -50,15 +50,11 @@ git push -u origin main
 Shows what a client actually paid Arrow for an item vs. the eBay cost (minus a $2/unit prep fee), matched by ASIN.
 Currently configured for Ursula only — see `CLIENT_PAYMENT_SHEETS` in `lib/clientPayments.js` to add more clients.
 
-1. Get a free Google Sheets API key: [console.cloud.google.com](https://console.cloud.google.com) → create/select a
-   project → **APIs & Services → Library** → enable **Google Sheets API** → **Credentials → Create Credentials → API key**.
-   (No service account or OAuth needed — this key only needs to *list* tabs on sheets that are already publicly viewable.)
-2. In Vercel: **Settings → Environment Variables** → add `GOOGLE_SHEETS_API_KEY` = that key → redeploy.
-3. Make sure each client's Purchase Order sheet is shared **Anyone with the link → Viewer** (same as the Flipmine
-   sheet in step 1) — the app needs to read it without logging in.
+No API key or extra setup needed beyond one thing: each client's Purchase Order sheet must be shared **Anyone with
+the link → Viewer** (same as the Flipmine sheet in step 1). Tab names are discovered automatically by reading the
+sheet's own public page — no Google Cloud project required.
 
-Without this env var, the Overage section just shows a "not configured" message rather than breaking the rest of
-the dashboard.
+If a client's overage isn't showing, the most likely cause is that sheet not being shared publicly yet.
 
 ## 7. (Optional) Confirm the sheet ID
 

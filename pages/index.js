@@ -724,10 +724,7 @@ function Overage({ overage, clientColor }) {
 
       {!o.enabled ? (
         <div className="card">
-          <p style={{ color: 'var(--muted)' }}>
-            Overage isn&apos;t configured yet: {o.reason || 'no reason given'}. Add a <code>GOOGLE_SHEETS_API_KEY</code> environment
-            variable (see README) so this section can discover each client&apos;s Purchase Order sheet tabs.
-          </p>
+          <p style={{ color: 'var(--muted)' }}>Overage isn&apos;t available right now: {o.reason || 'no reason given'}.</p>
         </div>
       ) : Object.keys(o.clients).length === 0 ? (
         <div className="card"><p style={{ color: 'var(--muted)' }}>No clients configured for overage tracking yet.</p></div>

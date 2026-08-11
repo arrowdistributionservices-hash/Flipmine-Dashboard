@@ -31,7 +31,7 @@ export default async function handler(req, res) {
     const records = await fetchAllSourcingRecords(debugLog);
     sourcing = buildSourcingDashboardData(records);
     try {
-      overage = await computeOverage(records, process.env.GOOGLE_SHEETS_API_KEY, debugLog);
+      overage = await computeOverage(records, debugLog);
     } catch (e) {
       overage = { enabled: false, reason: String(e), clients: {} };
     }
