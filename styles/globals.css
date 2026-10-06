@@ -124,7 +124,7 @@ tr.detail td { background: var(--subtle); padding: 8px 12px 12px; }
 /* Charts (Chart.js) */
 .charts-grid { display: flex; flex-wrap: wrap; gap: 16px; }
 .charts-grid > .card { flex: 1 1 420px; }
-canvas { max-height: 260px; }
+.chart-box { position: relative; height: 260px; }
 
 /* Empty / placeholder states */
 .empty-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 20px; background: var(--card); border: 1px dashed var(--border-strong); border-radius: 12px; font-size: 14px; color: var(--text-2); }

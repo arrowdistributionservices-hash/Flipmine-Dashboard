@@ -103,6 +103,19 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [chartReady, setChartReady] = useState(false);
   const [mode, setMode] = useState('recorded');
+  const [tab, setTab] = useState('overview');
+
+  // Each tab is its own view; the URL hash (#purchasing etc.) keeps the open tab on reload and makes it linkable.
+  useEffect(() => {
+    const fromHash = () => {
+      const id = window.location.hash.replace('#', '');
+      setTab(TABS.some(([t]) => t === id) ? id : 'overview');
+      window.scrollTo(0, 0);
+    };
+    fromHash();
+    window.addEventListener('hashchange', fromHash);
+    return () => window.removeEventListener('hashchange', fromHash);
+  }, []);
 
   useEffect(() => {
     fetch('/api/data')
@@ -134,43 +147,23 @@ export default function Home() {
   return (
     <>
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" strategy="afterInteractive" onLoad={() => setChartReady(true)} />
-      <GlobalNav lastEntry={lastEntry} />
-      <div className="gsection" id="overview">
-        <Overview sourcing={sourcing} days={days} weekly={(purchasing && purchasing.weekly) || []} bySource={(purchasing && purchasing.bySource) || {}}
-          salesAccounts={salesAccounts} mode={mode} setMode={setMode} generatedAt={generatedAt} />
-      </div>
-      <div className="gsection" id="purchasing">
-        <PurchasingSection days={days} weekly={(purchasing && purchasing.weekly) || []} />
-      </div>
-      <div className="gsection" id="clients">
-        <ClientsSection sourcing={sourcing} mode={mode} setMode={setMode} chartReady={chartReady} />
-      </div>
-      <div className="gsection" id="sales">
-        <SalesLoss salesAccounts={salesAccounts} sourcing={sourcing} />
-      </div>
+      <GlobalNav lastEntry={lastEntry} active={tab} />
+      <main className="gsection">
+        {tab === 'overview' && (
+          <Overview sourcing={sourcing} days={days} weekly={(purchasing && purchasing.weekly) || []} bySource={(purchasing && purchasing.bySource) || {}}
+            salesAccounts={salesAccounts} mode={mode} setMode={setMode} generatedAt={generatedAt} />
+        )}
+        {tab === 'purchasing' && <PurchasingSection days={days} weekly={(purchasing && purchasing.weekly) || []} />}
+        {tab === 'clients' && <ClientsSection sourcing={sourcing} mode={mode} setMode={setMode} chartReady={chartReady} />}
+        {tab === 'sales' && <SalesLoss salesAccounts={salesAccounts} sourcing={sourcing} />}
+      </main>
     </>
   );
 }
 
-const NAV_SECTIONS = [['overview', 'Overview'], ['purchasing', 'Purchasing'], ['clients', 'Clients'], ['sales', 'Sales']];
+const TABS = [['overview', 'Overview'], ['purchasing', 'Purchasing'], ['clients', 'Clients'], ['sales', 'Sales']];
 
-function GlobalNav({ lastEntry }) {
-  const [active, setActive] = useState('overview');
-
-  useEffect(() => {
-    const els = NAV_SECTIONS.map(([id]) => document.getElementById(id)).filter(Boolean);
-    if (!els.length) return;
-    const onScroll = () => {
-      const y = window.scrollY + 120;
-      let current = els[0].id;
-      for (const el of els) { if (el.offsetTop <= y) current = el.id; }
-      setActive(current);
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
+function GlobalNav({ lastEntry, active }) {
   const today = startOfDay(new Date());
   const gap = lastEntry ? daysBetween(lastEntry, today) : null;
   let warning = null;
@@ -182,8 +175,8 @@ function GlobalNav({ lastEntry }) {
       <div className="gnav-inner">
         <span className="gnav-brand">Flipmine</span>
         <nav className="gnav-links">
-          {NAV_SECTIONS.map(([id, label]) => (
-            <a key={id} href={`#${id}`} className={active === id ? 'active' : ''}>{label}</a>
+          {TABS.map(([id, label]) => (
+            <a key={id} href={`#${id}`} className={active === id ? 'active' : ''} aria-current={active === id ? 'page' : undefined}>{label}</a>
           ))}
         </nav>
         <div className="gnav-status">
@@ -529,6 +522,9 @@ function ClientsSection({ sourcing, mode, setMode, chartReady }) {
 
   const val = (d, recKey, corrKey) => (mode === 'recorded' ? d[recKey] : (d[corrKey] ?? d[recKey]));
 
+  // The tab unmounts when another tab opens; free its charts with it.
+  useEffect(() => () => Object.values(chartInstances.current).forEach(c => c && c.destroy()), []);
+
   useEffect(() => {
     if (!chartReady || typeof window === 'undefined' || !window.Chart) return;
     const Chart = window.Chart;
@@ -549,13 +545,13 @@ function ClientsSection({ sourcing, mode, setMode, chartReady }) {
     make('profit', profitChartRef, {
       type: 'bar',
       data: { labels, datasets: [{ label: 'Profit', data: profits, backgroundColor: accent, borderRadius: 4 }] },
-      options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtMoney0(ctx.raw) } } },
+      options: { maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtMoney0(ctx.raw) } } },
         scales: { y: { ticks: { callback: v => fmtMoneyShort(v) }, grid }, x: { grid: { display: false } } } },
     });
     make('roi', roiChartRef, {
       type: 'bar',
       data: { labels, datasets: [{ label: 'ROI', data: rois, backgroundColor: accent, borderRadius: 4 }] },
-      options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
+      options: { maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
         scales: { y: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid }, x: { grid: { display: false } } } },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -574,8 +570,8 @@ function ClientsSection({ sourcing, mode, setMode, chartReady }) {
       </div>
 
       <div className="charts-grid">
-        <div className="card"><h3>Profit by client</h3><canvas ref={profitChartRef} /></div>
-        <div className="card"><h3>ROI by client</h3><canvas ref={roiChartRef} /></div>
+        <div className="card"><h3>Profit by client</h3><div className="chart-box"><canvas ref={profitChartRef} /></div></div>
+        <div className="card"><h3>ROI by client</h3><div className="chart-box"><canvas ref={roiChartRef} /></div></div>
       </div>
 
       <section className="card" aria-labelledby="split-h">
