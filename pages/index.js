@@ -1,20 +1,28 @@
-import { useEffect, useRef, useState, Fragment } from 'react';
+import { useEffect, useMemo, useRef, useState, Fragment } from 'react';
 import Script from 'next/script';
 
+// ---------------- Formatting ----------------
 function fmtMoney(v) {
-  if (v === null || v === undefined || isNaN(v)) return '—';
+  if (v === null || v === undefined || isNaN(v)) return '–';
   const sign = v < 0 ? '−' : '';
-  return sign + '$' + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return sign + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtMoney0(v) {
+  if (v === null || v === undefined || isNaN(v)) return '–';
+  const sign = v < 0 ? '−' : '';
+  return sign + '$' + Math.round(Math.abs(v)).toLocaleString('en-US');
 }
 function fmtMoneyShort(v) {
-  if (v === null || v === undefined || isNaN(v)) return '—';
-  const sign = v < 0 ? '−' : '';
+  if (v === null || v === undefined || isNaN(v)) return '–';
   const a = Math.abs(v);
-  if (a >= 1000) return sign + '$' + (a / 1000).toFixed(1) + 'K';
-  return sign + '$' + a.toFixed(0);
+  if (a >= 1000) return (v < 0 ? '−' : '') + '$' + (a / 1000).toFixed(1) + 'K';
+  return fmtMoney0(v);
 }
-function fmtPct(v) { if (v === null || v === undefined || isNaN(v)) return '—'; return (v * 100).toFixed(1) + '%'; }
-function fmtPctRaw(v) { if (v === null || v === undefined || isNaN(v)) return '—'; return v.toFixed(1) + '%'; }
+function fmtPct(v) { if (v === null || v === undefined || isNaN(v)) return '–'; return (v * 100).toFixed(1) + '%'; }
+function fmtPctRaw(v) { if (v === null || v === undefined || isNaN(v)) return '–'; return v.toFixed(1) + '%'; }
+function plural(n, one, many) { return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`; }
+
+// ---------------- Dates ----------------
 function parseUsDate(s) {
   if (!s) return null;
   const parts = String(s).split('/');
@@ -22,21 +30,79 @@ function parseUsDate(s) {
   const d = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
   return isNaN(d.getTime()) ? null : d;
 }
+function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function startOfWeek(d) { return addDays(startOfDay(d), -((d.getDay() + 6) % 7)); } // Monday
+function daysBetween(a, b) { return Math.round((startOfDay(b) - startOfDay(a)) / 86400000); }
+function usKey(d) { return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; }
+function isoKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function fromIso(s) { const [y, m, d] = String(s || '').split('-').map(Number); return y && m && d ? new Date(y, m - 1, d) : null; }
+function fmtDay(d) { return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+function fmtDow(d) { return d.toLocaleDateString('en-US', { weekday: 'short' }); }
 
-const PALETTE = ['#4d7cff', '#00e0a8', '#ffb020', '#e264ff', '#ff4d6d', '#22d3ee', '#facc15', '#fb923c', '#a78bfa', '#34d399'];
-function hashColor(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return PALETTE[h % PALETTE.length];
+// Purchasing Log keys -> display names. Brands added to the sheet later show under their own name.
+const SOURCE_LABELS = { Nabeel: 'Nabeel (LEGO)', Hasan: 'Hasan', Faqahat: 'Faqahat (Arris)', Google: 'Google', Mattel: 'Mattel', Hasbro: 'Hasbro', StarWars: 'Star Wars' };
+const sourceLabel = (k) => SOURCE_LABELS[k] || k;
+const SOURCERS = ['Hasan', 'Nabeel', 'Faqahat', 'Scraper/Automated'];
+
+// One entry per logged day, oldest first, with the per-buyer split.
+function buildDays(bySource) {
+  const map = {};
+  Object.entries(bySource || {}).forEach(([src, dates]) => {
+    Object.entries(dates || {}).forEach(([key, v]) => {
+      const date = parseUsDate(key);
+      if (!date) return;
+      if (!map[key]) map[key] = { key, date, purchasing: 0, profit: 0, bySrc: {} };
+      map[key].purchasing += v.purchasing || 0;
+      map[key].profit += v.profit || 0;
+      map[key].bySrc[src] = v;
+    });
+  });
+  return Object.values(map).sort((a, b) => a.date - b.date);
 }
-const SOURCER_COLORS = { Hasan: '#4d7cff', Nabeel: '#e264ff', Faqahat: '#00e0a8', 'Scraper/Automated': '#8b91a5' };
+
+function sumRange(days, start, end) {
+  let p = 0, f = 0, n = 0;
+  days.forEach(d => { if (d.date >= start && d.date <= end) { p += d.purchasing; f += d.profit; n++; } });
+  return { p, f, n, roi: p ? f / p : null };
+}
+
+const PRESETS = [
+  ['week', 'This week'], ['lastweek', 'Last week'], ['month', 'This month'], ['30d', 'Last 30 days'], ['custom', 'Custom…'],
+];
+
+function computeRange(preset, today, custom) {
+  if (preset === 'week') {
+    const start = startOfWeek(today);
+    return { start, end: today, prevStart: addDays(start, -7), prevEnd: addDays(today, -7), short: 'this week', compare: 'same days last week' };
+  }
+  if (preset === 'lastweek') {
+    const start = addDays(startOfWeek(today), -7);
+    return { start, end: addDays(start, 6), prevStart: addDays(start, -7), prevEnd: addDays(start, -1), short: 'last week', compare: 'the week before' };
+  }
+  if (preset === 'month') {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    const prevStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const prevMonthEnd = addDays(start, -1);
+    const prevEnd = addDays(prevStart, daysBetween(start, today));
+    return { start, end: today, prevStart, prevEnd: prevEnd < prevMonthEnd ? prevEnd : prevMonthEnd, short: 'this month', compare: 'same days last month' };
+  }
+  if (preset === 'custom') {
+    const s = fromIso(custom.from), e = fromIso(custom.to);
+    if (s && e && s <= e) {
+      const len = daysBetween(s, e) + 1;
+      return { start: s, end: e, prevStart: addDays(s, -len), prevEnd: addDays(s, -1), short: `${fmtDay(s)} to ${fmtDay(e)}`, compare: `the ${len} days before` };
+    }
+  }
+  const start = addDays(today, -29);
+  return { start, end: today, prevStart: addDays(start, -30), prevEnd: addDays(start, -1), short: 'last 30 days', compare: 'the 30 days before' };
+}
 
 export default function Home() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [chartReady, setChartReady] = useState(false);
   const [mode, setMode] = useState('recorded');
-  const [breakdown, setBreakdown] = useState('mkt');
 
   useEffect(() => {
     fetch('/api/data')
@@ -48,54 +114,51 @@ export default function Home() {
       .catch(e => setError(String(e)));
   }, []);
 
+  const days = useMemo(() => buildDays(data && data.purchasing && data.purchasing.bySource), [data]);
+
   if (error) {
     return (
-      <div style={{ padding: '40px 5vw' }}>
-        <h1>Flipmine — Global Dashboard</h1>
-        <p style={{ color: 'var(--rose)', marginTop: 16 }}>Couldn&apos;t load live data yet: {error}</p>
-        <p style={{ color: 'var(--muted)', fontSize: 13 }}>This is expected until the Google Sheet is shared publicly and the database is connected.</p>
+      <div className="wrap" style={{ maxWidth: 640 }}>
+        <h1>Flipmine</h1>
+        <p className="section-note" style={{ marginTop: 16 }}>Couldn&apos;t load live data: {error}</p>
+        <p className="subtitle">The Flipmine Deals sheet must be shared as &quot;Anyone with the link can view&quot; for the dashboard to read it.</p>
       </div>
     );
   }
-  if (!data) return <div style={{ padding: '40px 5vw', color: 'var(--muted)' }}>Loading live data…</div>;
+  if (!data) return <div className="wrap" style={{ color: 'var(--muted)' }}>Loading live data…</div>;
 
   const { sourcing, sales, purchasing, generatedAt } = data;
   const salesAccounts = Object.values(sales || {});
-  const clientColor = (name) => SOURCER_COLORS[name] ? SOURCER_COLORS[name] : hashColor(name);
+  const lastEntry = days.length ? days[days.length - 1].date : null;
 
   return (
     <>
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js" strategy="afterInteractive" onLoad={() => setChartReady(true)} />
-      <GlobalNav />
+      <GlobalNav lastEntry={lastEntry} />
       <div className="gsection" id="overview">
-        <SectionLabel n="01">Business Snapshot</SectionLabel>
-        <Overview sourcing={sourcing} salesAccounts={salesAccounts} purchasing={purchasing} generatedAt={generatedAt} clientColor={clientColor} />
+        <Overview sourcing={sourcing} days={days} weekly={(purchasing && purchasing.weekly) || []} bySource={(purchasing && purchasing.bySource) || {}}
+          salesAccounts={salesAccounts} mode={mode} setMode={setMode} generatedAt={generatedAt} />
       </div>
-      <hr className="gdivider" />
-      <div className="gsection" id="sourcing">
-        <SectionLabel n="02">Sourcing Pipeline (Deals Bought)</SectionLabel>
-        <SourcingPipeline sourcing={sourcing} mode={mode} setMode={setMode} breakdown={breakdown} setBreakdown={setBreakdown} chartReady={chartReady} clientColor={clientColor} />
+      <div className="gsection" id="purchasing">
+        <PurchasingSection days={days} weekly={(purchasing && purchasing.weekly) || []} />
       </div>
-      <hr className="gdivider" />
+      <div className="gsection" id="clients">
+        <ClientsSection sourcing={sourcing} mode={mode} setMode={setMode} chartReady={chartReady} />
+      </div>
       <div className="gsection" id="sales">
-        <SectionLabel n="03">Sales &amp; Loss (Live Marketplace Performance)</SectionLabel>
-        <SalesLoss salesAccounts={salesAccounts} sourcing={sourcing} clientColor={clientColor} />
+        <SalesLoss salesAccounts={salesAccounts} sourcing={sourcing} />
       </div>
     </>
   );
 }
 
-function SectionLabel({ n, children }) {
-  return <div className="gsection-label"><span className="n">{n}</span>{children}</div>;
-}
+const NAV_SECTIONS = [['overview', 'Overview'], ['purchasing', 'Purchasing'], ['clients', 'Clients'], ['sales', 'Sales']];
 
-const NAV_SECTIONS = ['overview', 'sourcing', 'sales'];
-
-function GlobalNav() {
+function GlobalNav({ lastEntry }) {
   const [active, setActive] = useState('overview');
 
   useEffect(() => {
-    const els = NAV_SECTIONS.map(id => document.getElementById(id)).filter(Boolean);
+    const els = NAV_SECTIONS.map(([id]) => document.getElementById(id)).filter(Boolean);
     if (!els.length) return;
     const onScroll = () => {
       const y = window.scrollY + 120;
@@ -108,321 +171,358 @@ function GlobalNav() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  const today = startOfDay(new Date());
+  const gap = lastEntry ? daysBetween(lastEntry, today) : null;
+  let warning = null;
+  if (gap === 2) warning = `Nothing logged for ${fmtDay(addDays(lastEntry, 1))}`;
+  else if (gap > 2) warning = `Nothing logged since ${fmtDay(lastEntry)}`;
+
   return (
-    <div className="gnav">
+    <header className="gnav">
       <div className="gnav-inner">
-        <span className="gnav-brand">FLIPMINE</span>
-        <a href="#overview" className={active === 'overview' ? 'active' : ''}>Overview</a>
-        <a href="#sourcing" className={active === 'sourcing' ? 'active' : ''}>Sourcing Pipeline</a>
-        <a href="#sales" className={active === 'sales' ? 'active' : ''}>Sales &amp; Loss</a>
+        <span className="gnav-brand">Flipmine</span>
+        <nav className="gnav-links">
+          {NAV_SECTIONS.map(([id, label]) => (
+            <a key={id} href={`#${id}`} className={active === id ? 'active' : ''}>{label}</a>
+          ))}
+        </nav>
+        <div className="gnav-status">
+          {lastEntry && <span>Last purchase logged: {fmtDow(lastEntry)}, {fmtDay(lastEntry)}</span>}
+          {warning && (
+            <span className="pill-warn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5" /><path d="M12 16h.01" /></svg>
+              {warning}
+            </span>
+          )}
+        </div>
       </div>
-    </div>
+    </header>
   );
 }
 
-function Overview({ sourcing, salesAccounts, purchasing, generatedAt, clientColor }) {
-  const totalSalesProfit = salesAccounts.reduce((a, r) => a + (r.profit || 0), 0);
+function Delta({ cur, prev, compare, kind }) {
+  if (!prev || prev.n === 0) return <div className="kpi-sub">Nothing logged in {compare}</div>;
+  if (kind === 'roi') {
+    if (cur.roi === null || prev.roi === null) return <div className="kpi-sub">vs {compare}</div>;
+    const pts = (cur.roi - prev.roi) * 100;
+    return <div className="kpi-sub"><span className={pts >= 0 ? 'up' : 'down'}>{pts >= 0 ? '▲' : '▼'} {Math.abs(pts).toFixed(1)} pts</span> vs {compare} ({fmtPct(prev.roi)})</div>;
+  }
+  const a = kind === 'profit' ? cur.f : cur.p;
+  const b = kind === 'profit' ? prev.f : prev.p;
+  if (!b) return <div className="kpi-sub">vs {compare}</div>;
+  const pct = ((a - b) / b) * 100;
+  return <div className="kpi-sub"><span className={pct >= 0 ? 'up' : 'down'}>{pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(0)}%</span> vs {compare} ({fmtMoney0(b)})</div>;
+}
 
-  const clientsSorted = [...sourcing.clients].sort((a, b) => sourcing.by_client[b].profit - sourcing.by_client[a].profit);
-  const maxProfit = Math.max(...clientsSorted.map(c => sourcing.by_client[c].profit), 1);
-
-  const sourcerRows = Object.entries(sourcing.sourcer_efficiency).sort((a, b) => b[1].roi - a[1].roi);
-  const rankedAccounts = [...salesAccounts].sort((a, b) => b.profit - a.profit);
+function Overview({ sourcing, days, weekly, bySource, salesAccounts, mode, setMode, generatedAt }) {
+  const [preset, setPreset] = useState('week');
+  const today = startOfDay(new Date());
+  const [custom, setCustom] = useState({ from: isoKey(addDays(today, -13)), to: isoKey(today) });
+  const range = computeRange(preset, today, custom);
+  const cur = sumRange(days, range.start, range.end);
+  const prev = sumRange(days, range.prevStart, range.prevEnd);
+  const avg = cur.n ? cur.p / cur.n : null;
 
   return (
     <>
-      <div className="masthead">
-        <div>
-          <div className="brand">Flipmine · Mission Control</div>
-          <h1>Business Snapshot</h1>
-          <p className="tagline">One page for the whole team — sourcing pipeline, sell-side performance, and where each client stands. No spreadsheets to dig through.</p>
+      <div className="page-head">
+        <h1>Overview</h1>
+        <div className="seg" role="group" aria-label="Date range">
+          {PRESETS.map(([id, label]) => (
+            <button key={id} type="button" className={preset === id ? 'active' : ''} aria-pressed={preset === id} onClick={() => setPreset(id)}>{label}</button>
+          ))}
         </div>
-        <div className="meta">UPDATED <b>{new Date(generatedAt).toLocaleString()}</b><br />SOURCING <b>Live — Google Sheets</b><br />SELL-SIDE <b>{salesAccounts.length} accounts loaded</b></div>
+      </div>
+      {preset === 'custom' && (
+        <div className="custom-range">
+          <label>From <input type="date" value={custom.from} onChange={e => setCustom(c => ({ ...c, from: e.target.value }))} /></label>
+          <label>To <input type="date" value={custom.to} onChange={e => setCustom(c => ({ ...c, to: e.target.value }))} /></label>
+        </div>
+      )}
+
+      <section className="kpis" aria-label="Purchasing in the selected period">
+        <div className="kpi"><div className="kpi-label">Purchasing {range.short}</div><div className="kpi-value">{fmtMoney0(cur.p)}</div><Delta cur={cur} prev={prev} compare={range.compare} kind="spend" /></div>
+        <div className="kpi"><div className="kpi-label">Est. profit {range.short}</div><div className="kpi-value">{fmtMoney0(cur.f)}</div><Delta cur={cur} prev={prev} compare={range.compare} kind="profit" /></div>
+        <div className="kpi"><div className="kpi-label">Est. ROI {range.short}</div><div className="kpi-value">{fmtPct(cur.roi)}</div><Delta cur={cur} prev={prev} compare={range.compare} kind="roi" /></div>
+        <div className="kpi"><div className="kpi-label">Daily average, {range.short}</div><div className="kpi-value">{fmtMoney0(avg)}</div><div className="kpi-sub">{plural(cur.n, 'buying day', 'buying days')}, {fmtDay(range.start)} to {fmtDay(range.end)}</div></div>
+      </section>
+
+      <div className="row">
+        <WeeklyChart weekly={weekly} today={today} />
+        <RecentDays days={days} />
       </div>
 
-      <div className="kpi-band">
-        <div className="kpi"><div className="kpi-label">Deals Bought</div><div className="kpi-value">{sourcing.total_count.toLocaleString()}</div><div className="kpi-sub">across {sourcing.clients.length} sourcing clients</div></div>
-        <div className="kpi"><div className="kpi-label">Sourcing Spend</div><div className="kpi-value">{fmtMoneyShort(sourcing.global.cost)}</div><div className="kpi-sub">recorded cost</div></div>
-        <div className="kpi"><div className="kpi-label">Sourcing Profit</div><div className="kpi-value teal">{fmtMoneyShort(sourcing.global.profit)}</div><div className="kpi-sub">on paper, pre-fees</div></div>
-        <div className="kpi"><div className="kpi-label">Blended Sourcing ROI</div><div className="kpi-value accent">{fmtPct(sourcing.global.roi)}</div><div className="kpi-sub">{fmtPct(sourcing.global.corr_roi)} corrected</div></div>
-        <div className="kpi"><div className="kpi-label">Sell-Side Profit</div><div className={`kpi-value ${totalSalesProfit < 0 ? 'rose' : 'teal'}`}>{fmtMoneyShort(totalSalesProfit)}</div><div className="kpi-sub">{salesAccounts.length} accounts, net</div></div>
+      <div className="row">
+        <BuyersCard bySource={bySource} range={range} today={today} />
+        <BrandsCard brands={sourcing.brand_breakdown || []} />
       </div>
 
-      <section>
-        <div className="section-head"><span className="section-title">Client Leaderboard</span><a href="#sourcing" className="section-link">Full breakdown, per-client &amp; per-sourcer →</a></div>
-        <div className="card">
-          {clientsSorted.slice(0, 2).map(c => {
-            const d = sourcing.by_client[c];
-            return (
-              <div className="lb-row" key={c}>
-                <div className="lb-name" style={{ color: clientColor(c) }}>{c}</div>
-                <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(4, (d.profit / maxProfit) * 100)}%`, background: clientColor(c) }} /></div>
-                <div className="lb-profit">{fmtMoney(d.profit)}</div>
-                <div className="lb-roi">{fmtPct(d.roi)}</div>
-              </div>
-            );
-          })}
-          {sourcerRows.length > 1 && (
-            <div className="callout" style={{ marginTop: clientsSorted.length ? 14 : 0 }}>
-              Top client is <b style={{ color: clientColor(clientsSorted[0]) }}>{clientsSorted[0]}</b> at {fmtMoney(sourcing.by_client[clientsSorted[0]].profit)} profit. Top sourcer is <b>{sourcerRows[0][0]}</b>, running {fmtPct(sourcerRows[0][1].roi)} ROI across {sourcerRows[0][1].n} deals.
-            </div>
-          )}
-        </div>
-      </section>
+      <ClientsTable sourcing={sourcing} mode={mode} setMode={setMode} />
 
-      <section>
-        <div className="section-head"><span className="section-title">Purchasing Breakdown</span><span className="section-desc">By brand, by day, by week</span></div>
-        <div className="grid-2 even" style={{ marginBottom: 16 }}>
-          <BrandBreakdownCard brands={sourcing.brand_breakdown || []} />
-          <PurchasingSearchCard bySource={purchasing && purchasing.bySource} />
+      {salesAccounts.length === 0 ? (
+        <div className="empty-line">
+          <span>Sell-side results appear here once a Sellerboard export is uploaded.</span>
+          <a href="/admin" className="strong">Upload in Admin</a>
         </div>
-        <div className="grid-2 even">
-          <DailyPurchasingCard daily={(purchasing && purchasing.daily) || []} bySource={purchasing && purchasing.bySource} />
-          <WeeklyPurchasingCard weekly={(purchasing && purchasing.weekly) || []} />
+      ) : (
+        <div className="empty-line">
+          <span>{plural(salesAccounts.length, 'sell-side account', 'sell-side accounts')} loaded, net {fmtMoney0(salesAccounts.reduce((a, r) => a + (r.profit || 0), 0))}.</span>
+          <a href="#sales" className="strong">See sales</a>
         </div>
-      </section>
-
-      <section>
-        <div className="section-head"><span className="section-title">Sell-Side Snapshot</span><a href="#sales" className="section-link">Per-account detail, top &amp; bottom SKUs →</a></div>
-        {salesAccounts.length === 0 ? (
-          <div className="card"><p style={{ color: 'var(--muted)' }}>No sell-side accounts uploaded yet. Go to <a href="/admin">/admin</a> to upload the first Sellerboard export.</p></div>
-        ) : (
-          <div className="card">
-            <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>
-              Best account: <b style={{ color: clientColor(rankedAccounts[0].client) }}>{rankedAccounts[0].client} · {rankedAccounts[0].marketplace}</b> at {fmtMoney(rankedAccounts[0].profit)}.
-              {rankedAccounts.length > 1 && rankedAccounts[rankedAccounts.length - 1].profit < 0 && (
-                <> Weakest: <b style={{ color: clientColor(rankedAccounts[rankedAccounts.length - 1].client) }}>{rankedAccounts[rankedAccounts.length - 1].client} · {rankedAccounts[rankedAccounts.length - 1].marketplace}</b> at {fmtMoney(rankedAccounts[rankedAccounts.length - 1].profit)}.</>
-              )}
-              {' '}{rankedAccounts.length} of 13 managed accounts loaded.
-            </p>
-          </div>
-        )}
-      </section>
+      )}
 
       <footer>
-        <span>Sources: Flipmine Deals (Google Sheets, live) · Sellerboard/ThreeColts uploads</span>
-        <span>Internal — for Flipmine team use</span>
+        Purchasing figures come from the Purchasing Log tab. Deal, brand and client figures come from rows marked Bought across the Flipmine Deals sheet. Data loaded {new Date(generatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}.
       </footer>
     </>
   );
 }
 
-const BRAND_SOURCE_MAP = { LEGO: ['Nabeel', 'Hasan'], ARRIS: ['Faqahat'], Google: ['Google'], Mattel: ['Mattel'], Hasbro: ['Hasbro'], 'Star Wars': ['StarWars'] };
-
-function PurchasingSearchCard({ bySource }) {
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [selected, setSelected] = useState({ LEGO: true, ARRIS: true, Google: true });
-
-  const toggle = (brand) => setSelected(s => ({ ...s, [brand]: !s[brand] }));
-
-  const fromDate = from ? new Date(from + 'T00:00:00') : null;
-  const toDate = to ? new Date(to + 'T23:59:59') : null;
-
-  const inRange = (dateStr) => {
-    const d = parseUsDate(dateStr);
-    if (!d) return false;
-    if (fromDate && d < fromDate) return false;
-    if (toDate && d > toDate) return false;
-    return true;
-  };
-
-  const results = Object.entries(BRAND_SOURCE_MAP)
-    .filter(([brand]) => selected[brand])
-    .map(([brand, sources]) => {
-      let purchasing = 0, profit = 0;
-      sources.forEach(src => {
-        const bucket = (bySource && bySource[src]) || {};
-        Object.entries(bucket).forEach(([date, v]) => {
-          if (inRange(date)) { purchasing += v.purchasing; profit += v.profit || 0; }
-        });
-      });
-      const roi = purchasing ? profit / purchasing : null;
-      return { brand, purchasing, profit, roi };
-    });
-
-  const grand = results.reduce((a, r) => ({ purchasing: a.purchasing + r.purchasing, profit: a.profit + r.profit }), { purchasing: 0, profit: 0 });
-  const grandRoi = grand.purchasing ? grand.profit / grand.purchasing : null;
-  const hasRange = !!(from || to);
-
+function WeeklyChart({ weekly, today }) {
+  const weeks = weekly.slice(-12);
+  const thisWeek = usKey(startOfWeek(today));
+  const max = Math.max(...weeks.map(w => w.total || 0), 1);
+  const hasWholesale = weeks.some(w => w.wholesale);
+  const PX = 190;
   return (
-    <div className="card">
-      <h3>Search purchasing — by period &amp; brand</h3>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-end' }}>
-        <div className="form-row" style={{ marginBottom: 0, minWidth: 150 }}>
-          <label>From</label>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)} />
-        </div>
-        <div className="form-row" style={{ marginBottom: 0, minWidth: 150 }}>
-          <label>To</label>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)} />
-        </div>
-        {hasRange && (
-          <button className="btab" onClick={() => { setFrom(''); setTo(''); }} style={{ height: 38 }}>Clear</button>
-        )}
+    <section className="card wide" aria-labelledby="weekly-h">
+      <div className="section-head">
+        <h2 id="weekly-h">Weekly purchasing</h2>
+        <span className="section-desc">Last {weeks.length} weeks, Monday to Sunday</span>
+        <a href="#purchasing" className="push" style={{ fontSize: 13, fontWeight: 500 }}>See all weeks</a>
       </div>
-      <div className="toggle-row" style={{ marginBottom: 18 }}>
-        {Object.keys(BRAND_SOURCE_MAP).map(brand => (
-          <div key={brand} className={`toggle-btn ${selected[brand] ? 'active' : ''}`} onClick={() => toggle(brand)}>{brand}</div>
-        ))}
-      </div>
-
-      {results.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>Select at least one brand to see results.</p>
-      ) : (
+      {weeks.length === 0 ? <p className="section-note" style={{ marginTop: 16 }}>No purchasing logged yet.</p> : (
         <>
-          <div className="kpi-row" style={{ marginBottom: 16 }}>
-            <div className="kpi"><div className="kpi-label">Total Spend</div><div className="kpi-value">{fmtMoney(grand.purchasing)}</div><div className="kpi-sub">{hasRange ? 'selected period' : 'all time'}</div></div>
-            <div className="kpi"><div className="kpi-label">Est. Profit</div><div className="kpi-value teal">{fmtMoney(grand.profit)}</div></div>
-            <div className="kpi"><div className="kpi-label">Est. ROI</div><div className="kpi-value accent">{grandRoi !== null ? fmtPct(grandRoi) : '—'}</div></div>
+          <div className="bars">
+            {weeks.map(w => {
+              const current = w.start === thisWeek;
+              const main = w.e2aE2w || 0, whole = w.wholesale || 0;
+              return (
+                <div className="bar-col" key={w.week} title={`${w.week}: ${fmtMoney0(w.total)}`}>
+                  <div className="bar-val">{fmtMoneyShort(w.total)}{current ? ' so far' : ''}</div>
+                  <div className="bar-stack">
+                    {whole > 0 && <div className="bar-seg" style={{ height: Math.round((whole / max) * PX), background: 'var(--grey-bar)' }} />}
+                    <div className="bar-seg" style={{ height: Math.max(3, Math.round((main / max) * PX)), background: current ? 'var(--accent-light)' : 'var(--accent)' }} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <table>
-            <thead><tr><th>Brand</th><th className="num">Spend</th><th className="num">Est. Profit</th><th className="num">Est. ROI</th></tr></thead>
-            <tbody>
-              {results.map(r => (
-                <tr key={r.brand}>
-                  <td style={{ color: BRAND_TILE_COLORS[r.brand] || '#ccc', fontWeight: 600 }}>{r.brand}</td>
-                  <td className="num">{fmtMoney(r.purchasing)}</td>
-                  <td className="num pos">{fmtMoney(r.profit)}</td>
-                  <td className="num roi-cell">{r.roi !== null ? fmtPct(r.roi) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="bar-labels">{weeks.map(w => <div key={w.week}>{w.week.split(' - ')[0]}</div>)}</div>
+          <div className="legend">
+            <span><i className="swatch" style={{ background: 'var(--accent)' }} />Full week</span>
+            <span><i className="swatch" style={{ background: 'var(--accent-light)' }} />This week so far</span>
+            {hasWholesale && <span><i className="swatch" style={{ background: 'var(--grey-bar)' }} />Wholesale</span>}
+          </div>
         </>
       )}
-      <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>Based on the sheet&apos;s per-day sourcing totals (LEGO = Nabeel + Hasan, ARRIS = Faqahat, Google = Google Sourcing). Leave dates blank to search all available history.</p>
-    </div>
+    </section>
   );
 }
 
-const BRAND_TILE_COLORS = { ARRIS: '#00e0a8', LEGO: '#ffb020', Google: '#4d7cff', Honeywell: '#e264ff', Mattel: '#ff4d6d', Hasbro: '#fb923c', 'Star Wars': '#22d3ee', DeWalt: '#facc15', Milwaukee: '#dc2626', Ninja: '#94a3b8', PoolGuard: '#a3e635' };
-
-function BrandBreakdownCard({ brands }) {
-  const sortedByCost = [...brands].sort((a, b) => b.cost - a.cost);
-  const maxCost = Math.max(...sortedByCost.map(b => b.cost), 1);
-  return (
-    <div className="card">
-      <h3>Purchases by brand</h3>
-      {brands.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No branded deals matched yet.</p>
-      ) : (
-        <>
-          {sortedByCost.map(b => (
-            <div className="lb-row" key={b.brand}>
-              <div className="lb-name" style={{ color: BRAND_TILE_COLORS[b.brand] || '#ccc' }}>{b.brand}</div>
-              <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(4, (b.cost / maxCost) * 100)}%`, background: BRAND_TILE_COLORS[b.brand] || '#ccc' }} /></div>
-              <div className="lb-profit">{fmtMoney(b.cost)}</div>
-              <div className="lb-roi">{b.n} deals</div>
-            </div>
+function DayRows({ list }) {
+  const [open, setOpen] = useState(null);
+  return list.map(d => (
+    <Fragment key={d.key}>
+      <tr className="clickable" onClick={() => setOpen(open === d.key ? null : d.key)} aria-expanded={open === d.key}>
+        <td><span className="strong">{fmtDay(d.date)}</span> <span className="muted-cell" style={{ fontSize: 13 }}>{fmtDow(d.date)}</span> <span className="muted-cell" style={{ fontSize: 11 }}>{open === d.key ? '▾' : '▸'}</span></td>
+        <td className="num">{fmtMoney0(d.purchasing)}</td>
+        <td className="num">{fmtMoney0(d.profit)}</td>
+        <td className="num">{fmtPct(d.purchasing ? d.profit / d.purchasing : null)}</td>
+      </tr>
+      {open === d.key && (
+        <tr className="detail"><td colSpan={4}>
+          {Object.entries(d.bySrc).sort((a, b) => b[1].purchasing - a[1].purchasing).map(([src, v]) => (
+            <div className="detail-line" key={src}><span>{sourceLabel(src)}</span><span className="num">{fmtMoney0(v.purchasing)} · {fmtMoney0(v.profit)} profit</span></div>
           ))}
-          <table style={{ marginTop: 14 }}>
-            <thead><tr><th>Brand</th><th className="num">Deals</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
-            <tbody>
-              {sortedByCost.map(b => (
-                <tr key={b.brand}>
-                  <td style={{ color: BRAND_TILE_COLORS[b.brand] || '#ccc', fontWeight: 600 }}>{b.brand}</td>
-                  <td className="num">{b.n}</td>
-                  <td className="num">{fmtMoney(b.cost)}</td>
-                  <td className="num">{fmtMoney(b.profit)}</td>
-                  <td className="num roi-cell">{fmtPct(b.roi)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+        </td></tr>
       )}
-    </div>
-  );
+    </Fragment>
+  ));
 }
 
-const SOURCE_LABELS = { Nabeel: 'Nabeel (LEGO)', Hasan: 'Hasan (LEGO)', Faqahat: 'Faqahat (ARRIS)', Google: 'Google Sourcing', Mattel: 'Mattel', Hasbro: 'Hasbro', StarWars: 'Star Wars' };
-const SOURCE_ORDER = ['Nabeel', 'Hasan', 'Faqahat', 'Google', 'Mattel', 'Hasbro', 'StarWars'];
-
-function DailyPurchasingCard({ daily, bySource }) {
-  const [openDate, setOpenDate] = useState(null);
-  const last7 = daily.slice(-7);
-  // Known lines first, then any brand added to the sheet's Purchasing Log since.
-  const sources = [...SOURCE_ORDER, ...Object.keys(bySource || {}).filter(s => !SOURCE_ORDER.includes(s))];
-
+function RecentDays({ days }) {
+  const last7 = days.slice(-7).reverse();
   return (
-    <div className="card">
-      <h3>Daily purchasing — last {last7.length || 7} days</h3>
-      {last7.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No daily data available from the sheet yet.</p>
-      ) : (
-        <>
-          <table>
-            <thead><tr><th>Date</th><th className="num">Purchasing</th><th className="num">Est. Profit</th><th className="num">Est. ROI</th></tr></thead>
-            <tbody>
-              {last7.map((d, i) => (
-                <Fragment key={i}>
-                  <tr onClick={() => setOpenDate(openDate === d.date ? null : d.date)} style={{ cursor: 'pointer' }}>
-                    <td>{new Date(d.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} <span style={{ color: 'var(--muted)', fontSize: 10 }}>{openDate === d.date ? '▾' : '▸'}</span></td>
-                    <td className="num" style={{ textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'var(--muted)' }}>{fmtMoney(d.purchasing)}</td>
-                    <td className="num pos">{fmtMoney(d.profit)}</td>
-                    <td className="num roi-cell">{d.roi !== null ? fmtPct(d.roi) : '—'}</td>
-                  </tr>
-                  {openDate === d.date && (
-                    <tr>
-                      <td colSpan={4} style={{ background: '#10131c', padding: '10px 14px' }}>
-                        <div style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 10.5, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          Breakdown by sourcing line — {new Date(d.date).toLocaleDateString()}
-                        </div>
-                        {sources.map(src => {
-                          const v = bySource && bySource[src] && bySource[src][d.date];
-                          if (!v) return null;
-                          return (
-                            <div key={src} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0' }}>
-                              <span style={{ color: SOURCER_COLORS[src] || clientColorFallback(src) }}>{SOURCE_LABELS[src] || src}</span>
-                              <span className="num">{fmtMoney(v.purchasing)}</span>
-                            </div>
-                          );
-                        })}
-                        {sources.every(src => !(bySource && bySource[src] && bySource[src][d.date])) && (
-                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>No per-source detail for this date.</div>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>Click a date to see the per-sourcer split. Nabeel &amp; Hasan source LEGO, Faqahat sources ARRIS, Google Sourcing covers Google/Nest, plus Mattel, Hasbro, and Star Wars lines.</p>
-        </>
-      )}
-    </div>
-  );
-}
-function clientColorFallback(name) { return hashColor(name); }
-
-function WeeklyPurchasingCard({ weekly }) {
-  return (
-    <div className="card">
-      <h3>Weekly purchasing</h3>
-      {weekly.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No weekly data available from the sheet yet.</p>
-      ) : (
+    <section className="card narrow" aria-labelledby="days-h">
+      <div className="section-head"><h2 id="days-h">Last 7 buying days</h2></div>
+      <div className="table-wrap" style={{ marginTop: 16 }}>
         <table>
-          <thead><tr><th>Week</th><th className="num">E2A &amp; E2W</th><th className="num">Wholesale</th><th className="num">Total</th></tr></thead>
+          <thead><tr><th>Day</th><th className="num">Purchasing</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
+          <tbody><DayRows list={last7} /></tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function BuyersCard({ bySource, range, today }) {
+  const cutoff = addDays(today, -29);
+  const rows = Object.entries(bySource).map(([src, dates]) => {
+    let spend = 0, last = null, recent = 0;
+    Object.entries(dates || {}).forEach(([k, v]) => {
+      const d = parseUsDate(k);
+      if (!d) return;
+      if (d >= range.start && d <= range.end) spend += v.purchasing || 0;
+      if (d >= cutoff) recent += v.purchasing || 0;
+      if (!last || d > last) last = d;
+    });
+    return { src, spend, last, active: recent > 0 };
+  }).filter(r => r.last).sort((a, b) => b.last - a.last);
+  const active = rows.filter(r => r.active);
+  let summary = 'No buyer has logged purchasing in the last 30 days.';
+  if (active.length === 1) summary = `Only ${sourceLabel(active[0].src)} has logged purchasing in the last 30 days.`;
+  else if (active.length > 1) summary = `${active.length} of ${rows.length} buyers logged purchasing in the last 30 days.`;
+  return (
+    <section className="card half" aria-labelledby="buyers-h">
+      <div className="section-head"><h2 id="buyers-h">Buyers</h2><span className="section-desc">From the Purchasing Log</span></div>
+      <p className="section-note" style={{ marginTop: 10 }}>{summary}</p>
+      <div className="table-wrap" style={{ marginTop: 12 }}>
+        <table>
+          <thead><tr><th>Buyer / brand</th><th className="num">Purchasing, {range.short}</th><th className="num">Last entry</th></tr></thead>
           <tbody>
-            {weekly.map((w, i) => (
-              <tr key={i}>
-                <td>{w.week}</td>
-                <td className="num">{w.e2aE2w !== null ? fmtMoney(w.e2aE2w) : '—'}</td>
-                <td className="num">{w.wholesale !== null ? fmtMoney(w.wholesale) : '—'}</td>
-                <td className="num roi-cell">{fmtMoney(w.total)}</td>
+            {rows.map(r => (
+              <tr key={r.src} style={{ color: r.active ? 'var(--text)' : 'var(--muted)' }}>
+                <td className="strong">{sourceLabel(r.src)}</td>
+                <td className="num">{r.spend ? fmtMoney0(r.spend) : '–'}</td>
+                <td className="num">{fmtDay(r.last)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      )}
-    </div>
+      </div>
+    </section>
   );
 }
 
-function SourcingPipeline({ sourcing, mode, setMode, breakdown, setBreakdown, chartReady, clientColor }) {
+function BrandsCard({ brands }) {
+  const sorted = [...brands].sort((a, b) => b.cost - a.cost);
+  const max = Math.max(...sorted.map(b => b.cost), 1);
+  return (
+    <section className="card half" aria-labelledby="brands-h">
+      <div className="section-head"><h2 id="brands-h">Purchases by brand</h2><span className="section-desc">Bought deals, all time</span></div>
+      {sorted.length === 0 ? <p className="section-note" style={{ marginTop: 10 }}>No bought deals matched a brand yet.</p> : (
+        <div className="table-wrap" style={{ marginTop: 16 }}>
+          <table>
+            <thead><tr><th>Brand</th><th style={{ width: '30%' }}>Share of cost</th><th className="num">Deals</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
+            <tbody>
+              {sorted.map(b => (
+                <tr key={b.brand}>
+                  <td className="strong">{b.brand}</td>
+                  <td><div className="share"><div style={{ width: `${(b.cost / max) * 100}%` }} /></div></td>
+                  <td className="num">{b.n.toLocaleString('en-US')}</td>
+                  <td className="num">{fmtMoney0(b.cost)}</td>
+                  <td className="num">{fmtMoney0(b.profit)}</td>
+                  <td className="num">{fmtPct(b.roi)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ClientsTable({ sourcing, mode, setMode }) {
+  const [sort, setSort] = useState({ key: 'cost', dir: -1 });
+  const val = (d, rec, corr) => (mode === 'recorded' ? d[rec] : (d[corr] ?? d[rec]));
+  const rows = sourcing.clients.map(c => {
+    const d = sourcing.by_client[c];
+    const mkts = ['Walmart', 'Amazon'].filter(m => sourcing.by_client_mkt && sourcing.by_client_mkt[`${c}|${m}`] && sourcing.by_client_mkt[`${c}|${m}`].n > 0);
+    return { name: c, mkt: mkts.join(', '), n: d.n, cost: val(d, 'cost', 'corr_cost'), profit: val(d, 'profit', 'corr_profit'), roi: val(d, 'roi', 'corr_roi') };
+  });
+  rows.sort((a, b) => (sort.key === 'name' ? a.name.localeCompare(b.name) : a[sort.key] - b[sort.key]) * sort.dir);
+  const maxProfit = Math.max(...rows.map(r => r.profit), 1);
+  const g = sourcing.global;
+  const head = (key, label, num) => (
+    <th className={num ? 'num' : ''} aria-sort={sort.key === key ? (sort.dir < 0 ? 'descending' : 'ascending') : 'none'}>
+      <button type="button" className={`sort-btn ${sort.key === key ? 'active' : ''}`} onClick={() => setSort(s => ({ key, dir: s.key === key ? -s.dir : (key === 'name' ? 1 : -1) }))}>
+        {label}{sort.key === key ? (sort.dir < 0 ? ' ▼' : ' ▲') : ''}
+      </button>
+    </th>
+  );
+  return (
+    <section className="card" aria-labelledby="clients-h">
+      <div className="section-head">
+        <h2 id="clients-h">Clients</h2>
+        <span className="section-desc">Bought deals, all time</span>
+        <label className="check push">
+          <input type="checkbox" checked={mode === 'corrected'} onChange={e => setMode(e.target.checked ? 'corrected' : 'recorded')} />
+          Use $2/unit actual prep cost
+        </label>
+      </div>
+      <div className="table-wrap" style={{ marginTop: 8 }}>
+        <table>
+          <thead><tr>{head('name', 'Client')}<th>Marketplace</th>{head('n', 'Deals', true)}{head('cost', 'Cost', true)}{head('profit', 'Profit', true)}{head('roi', 'ROI', true)}<th style={{ width: '20%' }}>Share of profit</th></tr></thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.name}>
+                <td className="strong">{r.name}</td>
+                <td className="muted-cell">{r.mkt}</td>
+                <td className="num">{r.n.toLocaleString('en-US')}</td>
+                <td className="num">{fmtMoney0(r.cost)}</td>
+                <td className="num">{fmtMoney0(r.profit)}</td>
+                <td className="num">{fmtPct(r.roi)}</td>
+                <td><div className="share"><div style={{ width: `${Math.max(0, r.profit / maxProfit) * 100}%` }} /></div></td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td>All clients</td><td />
+              <td className="num">{g.n.toLocaleString('en-US')}</td>
+              <td className="num">{fmtMoney0(val(g, 'cost', 'corr_cost'))}</td>
+              <td className="num">{fmtMoney0(val(g, 'profit', 'corr_profit'))}</td>
+              <td className="num">{fmtPct(val(g, 'roi', 'corr_roi'))}</td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function PurchasingSection({ days, weekly }) {
+  const weeksDesc = [...weekly].reverse();
+  const last30 = days.slice(-30).reverse();
+  return (
+    <>
+      <div className="page-head"><h1>Purchasing</h1></div>
+      <div className="row">
+        <section className="card half" aria-labelledby="allweeks-h">
+          <div className="section-head"><h2 id="allweeks-h">Every week</h2><span className="section-desc">Monday to Sunday, newest first</span></div>
+          <div className="table-wrap" style={{ marginTop: 16 }}>
+            <table>
+              <thead><tr><th>Week</th><th className="num">E2A &amp; E2W</th><th className="num">Wholesale</th><th className="num">Total</th></tr></thead>
+              <tbody>
+                {weeksDesc.map(w => (
+                  <tr key={w.week}>
+                    <td className="strong">{w.week}</td>
+                    <td className="num">{fmtMoney0(w.e2aE2w)}</td>
+                    <td className="num muted-cell">{w.wholesale ? fmtMoney0(w.wholesale) : '–'}</td>
+                    <td className="num strong">{fmtMoney0(w.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className="card half" aria-labelledby="alldays-h">
+          <div className="section-head"><h2 id="alldays-h">Last 30 buying days</h2><span className="section-desc">Click a day for the split by buyer</span></div>
+          <div className="table-wrap" style={{ marginTop: 16 }}>
+            <table>
+              <thead><tr><th>Day</th><th className="num">Purchasing</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
+              <tbody><DayRows list={last30} /></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function ClientsSection({ sourcing, mode, setMode, chartReady }) {
+  const [breakdown, setBreakdown] = useState('mkt');
   const profitChartRef = useRef(null);
   const roiChartRef = useRef(null);
   const sourcerChartRef = useRef(null);
@@ -433,174 +533,153 @@ function SourcingPipeline({ sourcing, mode, setMode, breakdown, setBreakdown, ch
   useEffect(() => {
     if (!chartReady || typeof window === 'undefined' || !window.Chart) return;
     const Chart = window.Chart;
-    Chart.defaults.color = '#8b91a5';
-    Chart.defaults.borderColor = '#262a38';
+    Chart.defaults.color = '#5B6372';
+    Chart.defaults.borderColor = '#E3E6EB';
     Chart.defaults.font.family = "'IBM Plex Sans', sans-serif";
+    const accent = '#2F5BEA';
 
-    const labels = sourcing.clients;
+    const labels = [...sourcing.clients].sort((a, b) => val(sourcing.by_client[b], 'profit', 'corr_profit') - val(sourcing.by_client[a], 'profit', 'corr_profit'));
     const profits = labels.map(c => val(sourcing.by_client[c], 'profit', 'corr_profit'));
     const rois = labels.map(c => val(sourcing.by_client[c], 'roi', 'corr_roi'));
-    const bg = labels.map(c => clientColor(c));
+    const grid = { color: '#EEF0F3' };
 
-    if (chartInstances.current.profit) chartInstances.current.profit.destroy();
-    if (profitChartRef.current) {
-      chartInstances.current.profit = new Chart(profitChartRef.current, {
-        type: 'bar',
-        data: { labels, datasets: [{ label: 'Profit ($)', data: profits, backgroundColor: bg, borderRadius: 6 }] },
-        options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtMoney(ctx.raw) } } },
-          scales: { y: { ticks: { callback: v => '$' + v.toLocaleString() }, grid: { color: '#262a38' } }, x: { grid: { display: false } } } }
-      });
-    }
-
-    if (chartInstances.current.roi) chartInstances.current.roi.destroy();
-    if (roiChartRef.current) {
-      chartInstances.current.roi = new Chart(roiChartRef.current, {
-        type: 'bar',
-        data: { labels, datasets: [{ label: 'Avg ROI', data: rois, backgroundColor: bg, borderRadius: 6 }] },
-        options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
-          scales: { y: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid: { color: '#262a38' } }, x: { grid: { display: false } } } }
-      });
-    }
-
+    const make = (key, ref, config) => {
+      if (chartInstances.current[key]) chartInstances.current[key].destroy();
+      if (ref.current) chartInstances.current[key] = new Chart(ref.current, config);
+    };
+    make('profit', profitChartRef, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Profit', data: profits, backgroundColor: accent, borderRadius: 4 }] },
+      options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtMoney0(ctx.raw) } } },
+        scales: { y: { ticks: { callback: v => fmtMoneyShort(v) }, grid }, x: { grid: { display: false } } } },
+    });
+    make('roi', roiChartRef, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'ROI', data: rois, backgroundColor: accent, borderRadius: 4 }] },
+      options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
+        scales: { y: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid }, x: { grid: { display: false } } } },
+    });
     const sourcers = Object.keys(sourcing.sourcer_efficiency).sort((a, b) => sourcing.sourcer_efficiency[b].roi - sourcing.sourcer_efficiency[a].roi);
-    const srois = sourcers.map(s => sourcing.sourcer_efficiency[s].roi);
-    const sbg = sourcers.map(s => SOURCER_COLORS[s] || '#999');
-
-    if (chartInstances.current.sourcer) chartInstances.current.sourcer.destroy();
-    if (sourcerChartRef.current) {
-      chartInstances.current.sourcer = new Chart(sourcerChartRef.current, {
-        type: 'bar',
-        data: { labels: sourcers, datasets: [{ label: 'Avg ROI', data: srois, backgroundColor: sbg, borderRadius: 6 }] },
-        options: { indexAxis: 'y', plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
-          scales: { x: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid: { color: '#262a38' } }, y: { grid: { display: false } } } }
-      });
-    }
+    make('sourcer', sourcerChartRef, {
+      type: 'bar',
+      data: { labels: sourcers, datasets: [{ label: 'ROI', data: sourcers.map(s => sourcing.sourcer_efficiency[s].roi), backgroundColor: accent, borderRadius: 4 }] },
+      options: { indexAxis: 'y', plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
+        scales: { x: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid }, y: { grid: { display: false } } } },
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartReady, mode, sourcing]);
 
-  const dims = breakdown === 'mkt' ? ['Amazon', 'Walmart'] : ['Hasan', 'Nabeel', 'Faqahat', 'Scraper/Automated'];
+  const dims = breakdown === 'mkt' ? ['Amazon', 'Walmart'] : SOURCERS;
   const srcMap = breakdown === 'mkt' ? sourcing.by_client_mkt : sourcing.by_client_src;
-
-  const sourcerRows = Object.entries(sourcing.sourcer_efficiency).sort((a, b) => b[1].roi - a[1].roi);
+  const sourcerRows = Object.entries(sourcing.sourcer_efficiency).filter(([, d]) => d.n > 0).sort((a, b) => b[1].roi - a[1].roi);
   const top = sourcerRows[0], bottom = sourcerRows[sourcerRows.length - 1];
 
   return (
     <>
-      <h1>Flipmine — Sourcing Dashboard</h1>
-      <div className="subtitle">All {sourcing.total_count.toLocaleString()} bought deals across {sourcing.clients.join(', ')} — recorded vs. corrected ($2/unit actual prep cost)</div>
-
-      <div className="toggle-row">
-        <span style={{ fontSize: 12.5, color: 'var(--muted)', fontWeight: 600 }}>VIEW:</span>
-        <div className={`toggle-btn ${mode === 'recorded' ? 'active' : ''}`} onClick={() => setMode('recorded')}>Recorded</div>
-        <div className={`toggle-btn ${mode === 'corrected' ? 'active' : ''}`} onClick={() => setMode('corrected')}>Corrected ($2/unit prep)</div>
-      </div>
-
-      <div className="hero">
-        <div className="hero-label">Global — All Clients Combined</div>
-        <div className="hero-grid">
-          <div className="hero-stat deals"><div className="num">{sourcing.global.n.toLocaleString()}</div><div className="lbl">Total Bought Deals</div></div>
-          <div className="hero-stat cost"><div className="num">{fmtMoney(val(sourcing.global, 'cost', 'corr_cost'))}</div><div className="lbl">Total Cost</div></div>
-          <div className="hero-stat profit"><div className="num">{fmtMoney(val(sourcing.global, 'profit', 'corr_profit'))}</div><div className="lbl">Total Profit</div></div>
-          <div className="hero-stat roi"><div className="num">{fmtPct(val(sourcing.global, 'roi', 'corr_roi'))}</div><div className="lbl">Blended ROI</div></div>
-        </div>
-      </div>
-
-      <div className="cards">
-        {sourcing.clients.map(c => {
-          const d = sourcing.by_client[c];
-          const profit = val(d, 'profit', 'corr_profit');
-          return (
-            <div className="card client-card" key={c} style={{ borderTop: `3px solid ${clientColor(c)}` }}>
-              <div className="client-name" style={{ color: clientColor(c) }}>{c}</div>
-              <div className="metric-row"><span className="metric-label">Cost</span><span className="metric-value">{fmtMoney(val(d, 'cost', 'corr_cost'))}</span></div>
-              <div className="metric-row"><span className="metric-label">Profit</span><span className="metric-value">{fmtMoney(profit)}</span></div>
-              <div className="metric-row"><span className="metric-label">Avg ROI</span><span className="roi-value">{fmtPct(val(d, 'roi', 'corr_roi'))}</span></div>
-              <div className="deal-count">{d.n} bought deals{mode === 'corrected' ? ` · overage +${fmtMoney(d.corr_profit - d.profit)}` : ''}</div>
-            </div>
-          );
-        })}
+      <div className="page-head">
+        <h1>Clients and sourcers</h1>
+        <label className="check push" style={{ marginLeft: 'auto' }}>
+          <input type="checkbox" checked={mode === 'corrected'} onChange={e => setMode(e.target.checked ? 'corrected' : 'recorded')} />
+          Use $2/unit actual prep cost
+        </label>
       </div>
 
       <div className="charts-grid">
-        <div className="chart-card"><h3>Profit by Client ($)</h3><canvas ref={profitChartRef} /></div>
-        <div className="chart-card"><h3>Average ROI by Client</h3><canvas ref={roiChartRef} /></div>
+        <div className="card"><h3>Profit by client</h3><canvas ref={profitChartRef} /></div>
+        <div className="card"><h3>ROI by client</h3><canvas ref={roiChartRef} /></div>
       </div>
 
-      <div className="breakdown-section">
-        <div className="breakdown-tabs">
-          <div className={`btab ${breakdown === 'mkt' ? 'active' : ''}`} onClick={() => setBreakdown('mkt')}>By Marketplace</div>
-          <div className={`btab ${breakdown === 'src' ? 'active' : ''}`} onClick={() => setBreakdown('src')}>By Sourcer</div>
+      <section className="card" aria-labelledby="split-h">
+        <div className="section-head">
+          <h2 id="split-h">Each client, split by {breakdown === 'mkt' ? 'marketplace' : 'sourcer'}</h2>
+          <div className="toggle-row push">
+            <button type="button" className={`btab ${breakdown === 'mkt' ? 'active' : ''}`} aria-pressed={breakdown === 'mkt'} onClick={() => setBreakdown('mkt')}>By marketplace</button>
+            <button type="button" className={`btab ${breakdown === 'src' ? 'active' : ''}`} aria-pressed={breakdown === 'src'} onClick={() => setBreakdown('src')}>By sourcer</button>
+          </div>
         </div>
-        <table>
-          <thead><tr><th>Client</th><th>{breakdown === 'mkt' ? 'Marketplace' : 'Sourcer'}</th><th className="num">Deals</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">Avg ROI</th></tr></thead>
-          <tbody>
-            {sourcing.clients.map(client => dims.map(dim => {
-              const d = srcMap[`${client}|${dim}`];
-              if (!d || d.n === 0) return null;
-              return (
-                <tr key={`${client}|${dim}`}>
-                  <td style={{ color: clientColor(client), fontWeight: 600 }}>{client}</td>
-                  <td>{dim}</td>
-                  <td className="num">{d.n}</td>
-                  <td className="num">{fmtMoney(val(d, 'cost', 'corr_cost'))}</td>
-                  <td className="num">{fmtMoney(val(d, 'profit', 'corr_profit'))}</td>
-                  <td className="num roi-cell">{fmtPct(val(d, 'roi', 'corr_roi'))}</td>
-                </tr>
-              );
-            }))}
-          </tbody>
-        </table>
-      </div>
+        <div className="table-wrap" style={{ marginTop: 16 }}>
+          <table>
+            <thead><tr><th>Client</th><th>{breakdown === 'mkt' ? 'Marketplace' : 'Sourcer'}</th><th className="num">Deals</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
+            <tbody>
+              {sourcing.clients.map(client => dims.map(dim => {
+                const d = srcMap[`${client}|${dim}`];
+                if (!d || d.n === 0) return null;
+                return (
+                  <tr key={`${client}|${dim}`}>
+                    <td className="strong">{client}</td>
+                    <td>{dim}</td>
+                    <td className="num">{d.n.toLocaleString('en-US')}</td>
+                    <td className="num">{fmtMoney0(val(d, 'cost', 'corr_cost'))}</td>
+                    <td className="num">{fmtMoney0(val(d, 'profit', 'corr_profit'))}</td>
+                    <td className="num">{fmtPct(val(d, 'roi', 'corr_roi'))}</td>
+                  </tr>
+                );
+              }))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-      <div className="breakdown-section">
-        <h2 className="section-title">Sourcer Efficiency — Across All Clients</h2>
-        <div className="section-note">Who&apos;s actually best at finding profitable deals, independent of which client they were sourcing for.</div>
-        <div className="charts-grid">
-          <div className="chart-card"><h3>Avg ROI by Sourcer</h3><canvas ref={sourcerChartRef} /></div>
-          <div className="chart-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div className="charts-grid">
+        <div className="card"><h3>ROI by sourcer</h3><canvas ref={sourcerChartRef} /></div>
+        <section className="card" aria-labelledby="sourcers-h">
+          <h3 id="sourcers-h">Sourcers, across all clients</h3>
+          {top && bottom && top[0] !== bottom[0] && (
+            <p className="section-note" style={{ marginBottom: 12 }}>{top[0]} has the highest ROI ({fmtPct(top[1].roi)} over {plural(top[1].n, 'deal', 'deals')}). {bottom[0]} has the lowest ({fmtPct(bottom[1].roi)}).</p>
+          )}
+          <div className="table-wrap">
             <table>
-              <thead><tr><th>Sourcer</th><th className="num">Deals</th><th className="num">Profit</th><th className="num">Avg ROI</th><th>Clients</th></tr></thead>
+              <thead><tr><th>Sourcer</th><th className="num">Deals</th><th className="num">Profit</th><th className="num">ROI</th><th>Clients</th></tr></thead>
               <tbody>
                 {sourcerRows.map(([s, d]) => (
-                  <tr key={s}><td style={{ color: SOURCER_COLORS[s] || '#ccc', fontWeight: 600 }}>{s}</td><td className="num">{d.n}</td><td className="num">{fmtMoney(d.profit)}</td><td className="num roi-cell">{fmtPct(d.roi)}</td><td className="muted-cell">{d.clients.join(', ')}</td></tr>
+                  <tr key={s}><td className="strong">{s}</td><td className="num">{d.n.toLocaleString('en-US')}</td><td className="num">{fmtMoney0(d.profit)}</td><td className="num">{fmtPct(d.roi)}</td><td className="muted-cell">{d.clients.join(', ')}</td></tr>
                 ))}
               </tbody>
             </table>
           </div>
+        </section>
+      </div>
+
+      <section className="card" aria-labelledby="outliers-h">
+        <div className="section-head">
+          <h2 id="outliers-h">Highest-ROI deals outside ARRIS</h2>
+          <span className="section-desc">Top {sourcing.non_arris_outliers.length} bought deals by ROI</span>
         </div>
-        {top && bottom && (
-          <div className="callout" style={{ marginTop: 14 }}>
-            {top[0]} runs at the highest ROI ({fmtPct(top[1].roi)}) across {top[1].n} deals, while {bottom[0]} sits lowest ({fmtPct(bottom[1].roi)}). Worth understanding what&apos;s different — category, negotiation, timing — and whether the top performer&apos;s approach can scale to more volume.
-          </div>
-        )}
-      </div>
-
-      <div className="breakdown-section">
-        <h2 className="section-title">Beyond ARRIS — other deals worth a second look</h2>
-        <div className="section-note">ARRIS modems removed — that pattern&apos;s already known and tracked separately. These are the next-best {sourcing.non_arris_outliers.length} deals by ROI once ARRIS is excluded, no minimum threshold.</div>
-        <table>
-          <thead><tr><th>Client</th><th>Sourcer</th><th>eBay Title</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
-          <tbody>
-            {sourcing.non_arris_outliers.map((o, i) => (
-              <tr key={i}>
-                <td style={{ color: clientColor(o.client), fontWeight: 600 }}>{o.client}</td>
-                <td>{o.sourcer}</td>
-                <td style={{ maxWidth: 320 }}>{o.title || '—'}</td>
-                <td className="num">{fmtMoney(o.cost)}</td>
-                <td className="num">{fmtMoney(o.profit)}</td>
-                <td className="num" style={{ color: 'var(--rose)', fontWeight: 700 }}>{fmtPct(o.roi)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <footer>Source: Flipmine Deals — Google Sheets (live, refreshed on load). Companion section: Sales &amp; Loss.</footer>
+        <div className="table-wrap" style={{ marginTop: 16 }}>
+          <table>
+            <thead><tr><th>Client</th><th>Sourcer</th><th>Title</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
+            <tbody>
+              {sourcing.non_arris_outliers.map((o, i) => (
+                <tr key={i}>
+                  <td className="strong">{o.client}</td>
+                  <td>{o.sourcer}</td>
+                  <td style={{ minWidth: 260 }}>{o.title || '–'}</td>
+                  <td className="num">{fmtMoney(o.cost)}</td>
+                  <td className="num">{fmtMoney(o.profit)}</td>
+                  <td className="num strong">{fmtPct(o.roi)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>
   );
 }
 
-function SalesLoss({ salesAccounts, sourcing, clientColor }) {
+function SalesLoss({ salesAccounts, sourcing }) {
+  if (salesAccounts.length === 0) {
+    return (
+      <>
+        <div className="page-head"><h1>Sales</h1></div>
+        <div className="empty-line">
+          <span>No sell-side accounts uploaded yet.</span>
+          <a href="/admin" className="strong">Upload a Sellerboard export in Admin</a>
+        </div>
+      </>
+    );
+  }
+
   const totalProfit = salesAccounts.reduce((a, r) => a + (r.profit || 0), 0);
   const totalSales = salesAccounts.reduce((a, r) => a + (r.sales || 0), 0);
   const ranked = [...salesAccounts].sort((a, b) => b.profit - a.profit);
@@ -608,102 +687,82 @@ function SalesLoss({ salesAccounts, sourcing, clientColor }) {
 
   const byClient = {};
   salesAccounts.forEach(a => { (byClient[a.client] = byClient[a.client] || []).push(a); });
-  const clientNames = Object.keys(byClient).sort((a, b) => {
-    const pa = byClient[a].reduce((s, x) => s + x.profit, 0);
-    const pb = byClient[b].reduce((s, x) => s + x.profit, 0);
-    return pb - pa;
-  });
-
-  const sourcingClientsWithoutSales = sourcing.clients.filter(c => !byClient[c]);
+  const clientNames = Object.keys(byClient).sort((a, b) => byClient[b].reduce((s, x) => s + x.profit, 0) - byClient[a].reduce((s, x) => s + x.profit, 0));
+  const withoutSales = sourcing.clients.filter(c => !byClient[c]);
 
   return (
     <>
-      <h1>Flipmine — Sales &amp; Loss Dashboard</h1>
-      <div className="subtitle">Live marketplace performance and reimbursement recovery, per client → account.</div>
+      <div className="page-head"><h1>Sales</h1></div>
 
-      {salesAccounts.length === 0 ? (
-        <div className="card"><p style={{ color: 'var(--muted)' }}>No sales accounts uploaded yet. Go to <a href="/admin">/admin</a> to upload the first Sellerboard export.</p></div>
-      ) : (
-        <>
-          <div className={`alert ${totalProfit < 0 ? '' : 'good'}`}>
-            <div className="big">{fmtMoney(totalProfit)}</div>
-            <div className="txt">
-              <b>Combined net {totalProfit < 0 ? 'loss' : 'profit'} across all {salesAccounts.length} loaded accounts</b>, on {fmtMoney(totalSales)} in sales.
-            </div>
+      <div className={`alert ${totalProfit < 0 ? '' : 'good'}`}>
+        <div className="big">{fmtMoney0(totalProfit)}</div>
+        <div className="txt">Net {totalProfit < 0 ? 'loss' : 'profit'} across {plural(salesAccounts.length, 'account', 'accounts')}, on {fmtMoney0(totalSales)} in sales.</div>
+      </div>
+
+      <div className="coverage">
+        <span className="lbl">Accounts loaded</span>
+        <div className="dots">
+          {ranked.map(a => <div className="dot live" key={`${a.client}|${a.marketplace}`} title={`${a.client}, ${a.marketplace}`} />)}
+          {Array.from({ length: Math.max(0, 13 - ranked.length) }).map((_, i) => <div className="dot" key={i} title="Not loaded" />)}
+        </div>
+        <span className="status">{ranked.length} of 13</span>
+      </div>
+
+      <section className="card" aria-labelledby="ranked-h">
+        <h3 id="ranked-h">All accounts by net profit</h3>
+        {ranked.map(a => (
+          <div className="rank-row" key={`${a.client}|${a.marketplace}`}>
+            <div className="rank-name">{a.client}, {a.marketplace}</div>
+            <div className="rank-track"><div className={`rank-fill ${a.profit < 0 ? 'neg' : 'pos'}`} style={{ width: `${Math.max(2, (Math.abs(a.profit) / maxAbs) * 100)}%` }} /></div>
+            <div className={`rank-profit ${a.profit < 0 ? 'neg' : ''}`}>{fmtMoney0(a.profit)}</div>
+            <div className="rank-margin">{fmtPctRaw(a.margin)}</div>
           </div>
+        ))}
+      </section>
 
-          <div className="coverage">
-            <span className="lbl">Coverage</span>
-            <div className="dots">
-              {ranked.map(a => <div className="dot live" key={`${a.client}|${a.marketplace}`} style={{ background: clientColor(a.client) }} title={`${a.client} — ${a.marketplace}`} />)}
-              {Array.from({ length: Math.max(0, 13 - ranked.length) }).map((_, i) => <div className="dot" key={i} title="Pending" />)}
-            </div>
-            <span className="status">{ranked.length} of 13 accounts live</span>
+      {clientNames.map(client => (
+        <section className="card" key={client} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="client-head">
+            <div className="client-name">{client}</div>
+            <div className="client-sub">{plural(byClient[client].length, 'account', 'accounts')}{sourcing.by_client[client] ? `, ${plural(sourcing.by_client[client].n, 'sourced deal', 'sourced deals')}` : ''}</div>
           </div>
-
-          <div className="rank-strip">
-            <h2 style={{ marginBottom: 14 }}>All accounts, ranked by net profit</h2>
-            {ranked.map(a => (
-              <div className="rank-row" key={`${a.client}|${a.marketplace}`}>
-                <div className="rank-name" style={{ color: clientColor(a.client) }}>{a.client} · {a.marketplace}</div>
-                <div className="rank-track"><div className={`rank-fill ${a.profit < 0 ? 'neg' : 'pos'}`} style={{ width: `${Math.max(4, (Math.abs(a.profit) / maxAbs) * 100)}%` }} /></div>
-                <div className={`rank-profit ${a.profit < 0 ? 'neg' : 'pos'}`}>{fmtMoney(a.profit)}</div>
-                <div className="rank-margin">{fmtPctRaw(a.margin)}</div>
+          {byClient[client].map(a => (
+            <div key={`${a.client}|${a.marketplace}`} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div className="account-head">
+                <span className="account-tag">{a.marketplace}</span>
+                <span className="account-title">{a.client}, {a.marketplace}</span>
+                <span className="account-period">Sellerboard</span>
               </div>
-            ))}
-          </div>
-
-          {clientNames.map(client => (
-            <div className="client-block" key={client}>
-              <div className="client-head">
-                <div className="client-dot" style={{ background: clientColor(client) }} />
-                <div className="client-name" style={{ color: clientColor(client) }}>{client}</div>
-                <div className="client-sub">{byClient[client].length} account{byClient[client].length > 1 ? 's' : ''}{sourcing.by_client[client] ? ` · ${sourcing.by_client[client].n} sourced deals` : ''}</div>
+              <div className="kpi-row">
+                <div className="kpi"><div className="kpi-label">Sales</div><div className="kpi-value">{fmtMoney0(a.sales)}</div><div className="kpi-sub">{a.n} SKUs, {a.units} units</div></div>
+                <div className="kpi"><div className="kpi-label">Net profit</div><div className={`kpi-value ${a.profit < 0 ? 'neg' : ''}`}>{fmtMoney0(a.profit)}</div><div className="kpi-sub">{fmtPctRaw(a.margin)} margin</div></div>
+                {a.roi !== null && <div className="kpi"><div className="kpi-label">ROI</div><div className={`kpi-value ${a.roi < 0 ? 'neg' : ''}`}>{fmtPctRaw(a.roi)}</div></div>}
+                {a.refunds !== null && <div className="kpi"><div className="kpi-label">Refund units</div><div className="kpi-value">{a.refunds}</div><div className="kpi-sub">of {a.units} sold</div></div>}
               </div>
-              {byClient[client].map(a => (
-                <div className="account-block" key={`${a.client}|${a.marketplace}`}>
-                  <div className="account-head">
-                    <span className={`account-tag ${a.marketplace.toLowerCase()}`}>{a.marketplace}</span>
-                    <span className="account-title">{a.client} — {a.marketplace}</span>
-                    <span className="account-period">Sellerboard</span>
-                  </div>
-                  <div className="kpi-row">
-                    <div className="kpi"><div className="kpi-label">Sales</div><div className="kpi-value">{fmtMoney(a.sales)}</div><div className="kpi-sub">{a.n} SKUs, {a.units} units</div></div>
-                    <div className="kpi"><div className="kpi-label">Net Profit</div><div className={`kpi-value ${a.profit < 0 ? 'rose' : 'teal'}`}>{fmtMoney(a.profit)}</div><div className="kpi-sub">{fmtPctRaw(a.margin)} margin</div></div>
-                    {a.roi !== null && <div className="kpi"><div className="kpi-label">ROI</div><div className={`kpi-value ${a.roi < 0 ? 'rose' : 'teal'}`}>{fmtPctRaw(a.roi)}</div></div>}
-                    {a.refunds !== null && <div className="kpi"><div className="kpi-label">Refund Units</div><div className="kpi-value rose">{a.refunds}</div><div className="kpi-sub">of {a.units} sold</div></div>}
-                  </div>
-                  <div className="grid-2 even">
-                    <table>
-                      <thead><tr><th>Top 5</th><th className="num">Profit</th></tr></thead>
-                      <tbody>{a.top5.map((p, i) => <tr key={i}><td>{p.product}</td><td className="num pos">{fmtMoney(p.profit)}</td></tr>)}</tbody>
-                    </table>
-                    <table>
-                      <thead><tr><th>Bottom 5</th><th className="num">Profit</th></tr></thead>
-                      <tbody>{a.bottom5.map((p, i) => <tr key={i}><td>{p.product}</td><td className={`num ${p.profit < 0 ? 'neg' : 'pos'}`}>{fmtMoney(p.profit)}</td></tr>)}</tbody>
-                    </table>
-                  </div>
+              <div className="row">
+                <div className="table-wrap half">
+                  <table>
+                    <thead><tr><th>Top 5</th><th className="num">Profit</th></tr></thead>
+                    <tbody>{a.top5.map((p, i) => <tr key={i}><td>{p.product}</td><td className="num">{fmtMoney(p.profit)}</td></tr>)}</tbody>
+                  </table>
                 </div>
-              ))}
+                <div className="table-wrap half">
+                  <table>
+                    <thead><tr><th>Bottom 5</th><th className="num">Profit</th></tr></thead>
+                    <tbody>{a.bottom5.map((p, i) => <tr key={i}><td>{p.product}</td><td className={`num ${p.profit < 0 ? 'neg' : ''}`}>{fmtMoney(p.profit)}</td></tr>)}</tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           ))}
-        </>
-      )}
+        </section>
+      ))}
 
-      {sourcingClientsWithoutSales.length > 0 && (
-        <div className="client-block">
-          <div className="client-head">
-            <div className="client-dot" style={{ background: '#484f66' }} />
-            <div className="client-name" style={{ color: 'var(--muted)' }}>{sourcingClientsWithoutSales.join(' · ')}</div>
-            <div className="client-sub">no sell-side account loaded yet</div>
-          </div>
-          <div className="pending">
-            {sourcingClientsWithoutSales.map(c => `${c} (${sourcing.by_client[c].n} bought deals, ${fmtPct(sourcing.by_client[c].roi)} avg ROI)`).join(' · ')} — has real sourcing volume but no Sellerboard export uploaded yet. Go to <a href="/admin">/admin</a> to add one.
-          </div>
+      {withoutSales.length > 0 && (
+        <div className="pending">
+          No sell-side account loaded yet for {withoutSales.join(', ')}. <a href="/admin">Upload in Admin</a>.
         </div>
       )}
-
-      <footer>Sources: Sellerboard/ThreeColts uploads via /admin. Companion section: Sourcing Pipeline.</footer>
     </>
   );
 }
