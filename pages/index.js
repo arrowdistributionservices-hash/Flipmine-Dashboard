@@ -525,7 +525,6 @@ function ClientsSection({ sourcing, mode, setMode, chartReady }) {
   const [breakdown, setBreakdown] = useState('mkt');
   const profitChartRef = useRef(null);
   const roiChartRef = useRef(null);
-  const sourcerChartRef = useRef(null);
   const chartInstances = useRef({});
 
   const val = (d, recKey, corrKey) => (mode === 'recorded' ? d[recKey] : (d[corrKey] ?? d[recKey]));
@@ -559,25 +558,15 @@ function ClientsSection({ sourcing, mode, setMode, chartReady }) {
       options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
         scales: { y: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid }, x: { grid: { display: false } } } },
     });
-    const sourcers = Object.keys(sourcing.sourcer_efficiency).sort((a, b) => sourcing.sourcer_efficiency[b].roi - sourcing.sourcer_efficiency[a].roi);
-    make('sourcer', sourcerChartRef, {
-      type: 'bar',
-      data: { labels: sourcers, datasets: [{ label: 'ROI', data: sourcers.map(s => sourcing.sourcer_efficiency[s].roi), backgroundColor: accent, borderRadius: 4 }] },
-      options: { indexAxis: 'y', plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw) } } },
-        scales: { x: { ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grid }, y: { grid: { display: false } } } },
-    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartReady, mode, sourcing]);
 
   const dims = breakdown === 'mkt' ? ['Amazon', 'Walmart'] : SOURCERS;
   const srcMap = breakdown === 'mkt' ? sourcing.by_client_mkt : sourcing.by_client_src;
-  const sourcerRows = Object.entries(sourcing.sourcer_efficiency).filter(([, d]) => d.n > 0).sort((a, b) => b[1].roi - a[1].roi);
-  const top = sourcerRows[0], bottom = sourcerRows[sourcerRows.length - 1];
-
   return (
     <>
       <div className="page-head">
-        <h1>Clients and sourcers</h1>
+        <h1>Clients</h1>
         <label className="check push" style={{ marginLeft: 'auto' }}>
           <input type="checkbox" checked={mode === 'corrected'} onChange={e => setMode(e.target.checked ? 'corrected' : 'recorded')} />
           Use $2/unit actual prep cost
@@ -619,26 +608,6 @@ function ClientsSection({ sourcing, mode, setMode, chartReady }) {
           </table>
         </div>
       </section>
-
-      <div className="charts-grid">
-        <div className="card"><h3>ROI by sourcer</h3><canvas ref={sourcerChartRef} /></div>
-        <section className="card" aria-labelledby="sourcers-h">
-          <h3 id="sourcers-h">Sourcers, across all clients</h3>
-          {top && bottom && top[0] !== bottom[0] && (
-            <p className="section-note" style={{ marginBottom: 12 }}>{top[0]} has the highest ROI ({fmtPct(top[1].roi)} over {plural(top[1].n, 'deal', 'deals')}). {bottom[0]} has the lowest ({fmtPct(bottom[1].roi)}).</p>
-          )}
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Sourcer</th><th className="num">Deals</th><th className="num">Profit</th><th className="num">ROI</th><th>Clients</th></tr></thead>
-              <tbody>
-                {sourcerRows.map(([s, d]) => (
-                  <tr key={s}><td className="strong">{s}</td><td className="num">{d.n.toLocaleString('en-US')}</td><td className="num">{fmtMoney0(d.profit)}</td><td className="num">{fmtPct(d.roi)}</td><td className="muted-cell">{d.clients.join(', ')}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
 
       <section className="card" aria-labelledby="outliers-h">
         <div className="section-head">
