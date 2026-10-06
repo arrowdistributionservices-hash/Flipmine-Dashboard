@@ -39,7 +39,10 @@ button { font-family: inherit; }
 /* Top bar */
 .gnav { position: sticky; top: 0; z-index: 50; background: var(--card); border-bottom: 1px solid var(--border); }
 .gnav-inner { max-width: 1280px; margin: 0 auto; padding: 0 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 32px; min-height: 64px; }
-.gnav-brand { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.gnav-brand { display: inline-flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.gnav-brand:hover { color: var(--text); text-decoration: none; }
+.gnav-logo { height: 44px; width: auto; display: block; }
+.gnav-divider { width: 1px; height: 28px; background: var(--border); }
 .gnav-links { display: flex; gap: 4px; flex-wrap: wrap; }
 .gnav-links a { padding: 10px 12px; font-size: 14px; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; }
 .gnav-links a:hover { color: var(--text); text-decoration: none; }

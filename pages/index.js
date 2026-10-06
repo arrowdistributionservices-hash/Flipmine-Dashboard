@@ -173,7 +173,11 @@ function GlobalNav({ lastEntry, active }) {
   return (
     <header className="gnav">
       <div className="gnav-inner">
-        <span className="gnav-brand">Flipmine</span>
+        <a href="#overview" className="gnav-brand" aria-label="Arrow Distribution, Flipmine dashboard home">
+          <img src="/arrow-logo.png" alt="Arrow Distribution" className="gnav-logo" />
+          <span className="gnav-divider" aria-hidden="true" />
+          <span>Flipmine</span>
+        </a>
         <nav className="gnav-links">
           {TABS.map(([id, label]) => (
             <a key={id} href={`#${id}`} className={active === id ? 'active' : ''} aria-current={active === id ? 'page' : undefined}>{label}</a>
