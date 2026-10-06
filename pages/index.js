@@ -342,6 +342,8 @@ const SOURCE_ORDER = ['Nabeel', 'Hasan', 'Faqahat', 'Google', 'Mattel', 'Hasbro'
 function DailyPurchasingCard({ daily, bySource }) {
   const [openDate, setOpenDate] = useState(null);
   const last7 = daily.slice(-7);
+  // Known lines first, then any brand added to the sheet's Purchasing Log since.
+  const sources = [...SOURCE_ORDER, ...Object.keys(bySource || {}).filter(s => !SOURCE_ORDER.includes(s))];
 
   return (
     <div className="card">
@@ -367,17 +369,17 @@ function DailyPurchasingCard({ daily, bySource }) {
                         <div style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: 10.5, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                           Breakdown by sourcing line — {new Date(d.date).toLocaleDateString()}
                         </div>
-                        {SOURCE_ORDER.map(src => {
+                        {sources.map(src => {
                           const v = bySource && bySource[src] && bySource[src][d.date];
                           if (!v) return null;
                           return (
                             <div key={src} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0' }}>
-                              <span style={{ color: SOURCER_COLORS[src] || clientColorFallback(src) }}>{SOURCE_LABELS[src]}</span>
+                              <span style={{ color: SOURCER_COLORS[src] || clientColorFallback(src) }}>{SOURCE_LABELS[src] || src}</span>
                               <span className="num">{fmtMoney(v.purchasing)}</span>
                             </div>
                           );
                         })}
-                        {SOURCE_ORDER.every(src => !(bySource && bySource[src] && bySource[src][d.date])) && (
+                        {sources.every(src => !(bySource && bySource[src] && bySource[src][d.date])) && (
                           <div style={{ fontSize: 12, color: 'var(--muted)' }}>No per-source detail for this date.</div>
                         )}
                       </td>
