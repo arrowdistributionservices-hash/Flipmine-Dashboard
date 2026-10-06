@@ -64,6 +64,16 @@ button { font-family: inherit; }
 .custom-range { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; color: var(--text-2); }
 .custom-range input { min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; font: inherit; color: var(--text); background: var(--card); }
 
+/* Brand pie */
+.period-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px; }
+.period-label { font-size: 15px; font-weight: 600; min-width: 140px; text-align: center; }
+.step-btn { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; }
+.step-btn:hover { background: var(--subtle); }
+.period-bar .section-desc { margin-left: auto; }
+.pie-layout { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; margin-top: 16px; }
+.pie-box { position: relative; flex: 0 0 240px; height: 240px; margin: 0 auto; }
+.swatch { vertical-align: middle; }
+
 /* Cards */
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; min-width: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }

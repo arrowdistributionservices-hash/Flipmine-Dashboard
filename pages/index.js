@@ -151,7 +151,7 @@ export default function Home() {
       <main className="gsection">
         {tab === 'overview' && (
           <Overview sourcing={sourcing} days={days} weekly={(purchasing && purchasing.weekly) || []} bySource={(purchasing && purchasing.bySource) || {}}
-            salesAccounts={salesAccounts} mode={mode} setMode={setMode} generatedAt={generatedAt} />
+            salesAccounts={salesAccounts} mode={mode} setMode={setMode} generatedAt={generatedAt} chartReady={chartReady} />
         )}
         {tab === 'purchasing' && <PurchasingSection days={days} weekly={(purchasing && purchasing.weekly) || []} />}
         {tab === 'clients' && <ClientsSection sourcing={sourcing} mode={mode} setMode={setMode} chartReady={chartReady} />}
@@ -207,7 +207,7 @@ function Delta({ cur, prev, compare, kind }) {
   return <div className="kpi-sub"><span className={pct >= 0 ? 'up' : 'down'}>{pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(0)}%</span> vs {compare} ({fmtMoney0(b)})</div>;
 }
 
-function Overview({ sourcing, days, weekly, bySource, salesAccounts, mode, setMode, generatedAt }) {
+function Overview({ sourcing, days, weekly, bySource, salesAccounts, mode, setMode, generatedAt, chartReady }) {
   const [preset, setPreset] = useState('week');
   const today = startOfDay(new Date());
   const [custom, setCustom] = useState({ from: isoKey(addDays(today, -13)), to: isoKey(today) });
@@ -240,14 +240,13 @@ function Overview({ sourcing, days, weekly, bySource, salesAccounts, mode, setMo
         <div className="kpi"><div className="kpi-label">Daily average, {range.short}</div><div className="kpi-value">{fmtMoney0(avg)}</div><div className="kpi-sub">{plural(cur.n, 'buying day', 'buying days')}, {fmtDay(range.start)} to {fmtDay(range.end)}</div></div>
       </section>
 
-      <div className="row">
-        <WeeklyChart weekly={weekly} today={today} />
-        <RecentDays days={days} />
-      </div>
+      <WeeklyChart weekly={weekly} today={today} />
+
+      <BrandsCard sourcing={sourcing} bySource={bySource} lastEntry={days.length ? days[days.length - 1].date : null} chartReady={chartReady} />
 
       <div className="row">
+        <RecentDays days={days} />
         <BuyersCard bySource={bySource} range={range} today={today} />
-        <BrandsCard brands={sourcing.brand_breakdown || []} />
       </div>
 
       <ClientsTable sourcing={sourcing} mode={mode} setMode={setMode} />
@@ -278,7 +277,7 @@ function WeeklyChart({ weekly, today }) {
   const hasWholesale = weeks.some(w => w.wholesale);
   const PX = 190;
   return (
-    <section className="card wide" aria-labelledby="weekly-h">
+    <section className="card" aria-labelledby="weekly-h">
       <div className="section-head">
         <h2 id="weekly-h">Weekly purchasing</h2>
         <span className="section-desc">Last {weeks.length} weeks, Monday to Sunday</span>
@@ -337,7 +336,7 @@ function DayRows({ list }) {
 function RecentDays({ days }) {
   const last7 = days.slice(-7).reverse();
   return (
-    <section className="card narrow" aria-labelledby="days-h">
+    <section className="card half" aria-labelledby="days-h">
       <div className="section-head"><h2 id="days-h">Last 7 buying days</h2></div>
       <div className="table-wrap" style={{ marginTop: 16 }}>
         <table>
@@ -388,30 +387,150 @@ function BuyersCard({ bySource, range, today }) {
   );
 }
 
-function BrandsCard({ brands }) {
-  const sorted = [...brands].sort((a, b) => b.cost - a.cost);
-  const max = Math.max(...sorted.map(b => b.cost), 1);
+// Categorical colours in a fixed order, tied to the entity (never to its rank), so a brand keeps
+// its colour across periods. Validated for colour-blind separation; slices beyond these fold into Other.
+const SLICE_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+const OTHER_COLOR = '#8A93A3';
+const BRAND_COLOR = { LEGO: 0, Google: 1, ARRIS: 2, Honeywell: 3, DeWalt: 4, Milwaukee: 5, Ninja: 6, PoolGuard: 7 };
+const BUYER_COLOR = { Nabeel: 0, Google: 1, Faqahat: 2, Hasan: 3, Mattel: 4, Hasbro: 5, StarWars: 6 };
+
+const PERIODS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month'], ['all', 'All time'], ['custom', 'Custom…']];
+
+function periodRange(period, anchor, custom) {
+  if (period === 'day') return { start: anchor, end: anchor, label: `${fmtDow(anchor)}, ${fmtDay(anchor)}` };
+  if (period === 'week') { const s = startOfWeek(anchor); const e = addDays(s, 6); return { start: s, end: e, label: `${fmtDay(s)} to ${fmtDay(e)}` }; }
+  if (period === 'month') {
+    const s = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    return { start: s, end: new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0), label: s.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) };
+  }
+  if (period === 'custom') {
+    const s = fromIso(custom.from), e = fromIso(custom.to);
+    if (s && e && s <= e) return { start: s, end: e, label: `${fmtDay(s)} to ${fmtDay(e)}` };
+  }
+  return null; // all time
+}
+
+function shiftAnchor(period, anchor, dir) {
+  if (period === 'day') return addDays(anchor, dir);
+  if (period === 'week') return addDays(anchor, 7 * dir);
+  return new Date(anchor.getFullYear(), anchor.getMonth() + dir, Math.min(anchor.getDate(), 28));
+}
+
+function BrandsCard({ sourcing, bySource, lastEntry, chartReady }) {
+  const [period, setPeriod] = useState('week');
+  const [anchor, setAnchor] = useState(() => lastEntry || startOfDay(new Date()));
+  const [custom, setCustom] = useState(() => ({ from: isoKey(addDays(anchor, -13)), to: isoKey(anchor) }));
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+
+  const range = periodRange(period, anchor, custom);
+  const inRange = (key) => { const d = parseUsDate(key); return d && (!range || (d >= range.start && d <= range.end)); };
+
+  // Real brands where purchases carry a date; otherwise the Purchasing Log's split by buyer.
+  const brandRows = [];
+  if (!range) {
+    (sourcing.brand_breakdown || []).forEach(b => brandRows.push({ key: b.brand, name: b.brand, cost: b.cost, profit: b.profit, n: b.n }));
+    // Deals whose title matches no brand, so the total agrees with the Clients table.
+    const g = sourcing.global || {};
+    const other = { cost: (g.cost || 0) - brandRows.reduce((a, r) => a + r.cost, 0), profit: (g.profit || 0) - brandRows.reduce((a, r) => a + r.profit, 0), n: (g.n || 0) - brandRows.reduce((a, r) => a + r.n, 0) };
+    if (other.cost > 0.5) brandRows.push({ key: 'Other', name: 'Other', ...other });
+  } else {
+    Object.entries(sourcing.brand_by_day || {}).forEach(([brand, dates]) => {
+      let cost = 0, profit = 0, n = 0;
+      Object.entries(dates).forEach(([k, v]) => { if (inRange(k)) { cost += v.cost; profit += v.profit; n += v.n; } });
+      if (cost > 0) brandRows.push({ key: brand, name: brand, cost, profit, n });
+    });
+  }
+  const logRows = [];
+  if (range) {
+    Object.entries(bySource || {}).forEach(([src, dates]) => {
+      let cost = 0, profit = 0;
+      Object.entries(dates || {}).forEach(([k, v]) => { if (inRange(k)) { cost += v.purchasing || 0; profit += v.profit || 0; } });
+      if (cost > 0) logRows.push({ key: src, name: sourceLabel(src), cost, profit, n: null });
+    });
+  }
+  const brandTotal = brandRows.reduce((a, r) => a + r.cost, 0);
+  const logTotal = logRows.reduce((a, r) => a + r.cost, 0);
+  // Dated deals must account for nearly all of the period's logged spend, or the brand split would undercount.
+  const useBrands = !range || (brandTotal > 0 && brandTotal >= 0.9 * logTotal);
+  const source = useBrands ? 'brands' : 'buyers';
+  const colorIdx = useBrands ? BRAND_COLOR : BUYER_COLOR;
+
+  let rows = (useBrands ? brandRows : logRows).sort((a, b) => b.cost - a.cost);
+  const named = rows.filter(r => colorIdx[r.key] !== undefined);
+  const rest = rows.filter(r => colorIdx[r.key] === undefined);
+  rows = named.map(r => ({ ...r, color: SLICE_COLORS[colorIdx[r.key]] }));
+  if (rest.length) {
+    rows.push(rest.reduce((o, r) => ({ ...o, cost: o.cost + r.cost, profit: o.profit + r.profit, n: o.n === null ? null : o.n + (r.n || 0) }),
+      { key: 'Other', name: rest.length === 1 && rest[0].key !== 'Other' ? rest[0].name : 'Other', cost: 0, profit: 0, n: useBrands ? 0 : null, color: OTHER_COLOR }));
+  }
+  const total = rows.reduce((a, r) => a + r.cost, 0);
+  const sig = rows.map(r => `${r.key}:${r.cost.toFixed(2)}`).join('|');
+
+  useEffect(() => {
+    if (!chartReady || !window.Chart || !canvasRef.current) return;
+    if (chartRef.current) chartRef.current.destroy();
+    chartRef.current = null;
+    if (!rows.length) return;
+    chartRef.current = new window.Chart(canvasRef.current, {
+      type: 'pie',
+      data: { labels: rows.map(r => r.name), datasets: [{ data: rows.map(r => r.cost), backgroundColor: rows.map(r => r.color), borderColor: '#FFFFFF', borderWidth: 2 }] },
+      options: { maintainAspectRatio: false, animation: false, plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `${ctx.label}: ${fmtMoney0(ctx.raw)} (${fmtPct(total ? ctx.raw / total : 0)})` } } } },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartReady, sig]);
+  useEffect(() => () => { if (chartRef.current) chartRef.current.destroy(); }, []);
+
+  const stepLabel = { day: 'day', week: 'week', month: 'month' }[period];
   return (
-    <section className="card half" aria-labelledby="brands-h">
-      <div className="section-head"><h2 id="brands-h">Purchases by brand</h2><span className="section-desc">Bought deals, all time</span></div>
-      {sorted.length === 0 ? <p className="section-note" style={{ marginTop: 10 }}>No bought deals matched a brand yet.</p> : (
-        <div className="table-wrap" style={{ marginTop: 16 }}>
-          <table>
-            <thead><tr><th>Brand</th><th style={{ width: '30%' }}>Share of cost</th><th className="num">Deals</th><th className="num">Cost</th><th className="num">Profit</th><th className="num">ROI</th></tr></thead>
-            <tbody>
-              {sorted.map(b => (
-                <tr key={b.brand}>
-                  <td className="strong">{b.brand}</td>
-                  <td><div className="share"><div style={{ width: `${(b.cost / max) * 100}%` }} /></div></td>
-                  <td className="num">{b.n.toLocaleString('en-US')}</td>
-                  <td className="num">{fmtMoney0(b.cost)}</td>
-                  <td className="num">{fmtMoney0(b.profit)}</td>
-                  <td className="num">{fmtPct(b.roi)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <section className="card" aria-labelledby="brands-h">
+      <div className="section-head">
+        <h2 id="brands-h">Purchases by brand</h2>
+        <div className="seg push" role="group" aria-label="Brand period">
+          {PERIODS.map(([id, label]) => (
+            <button key={id} type="button" className={period === id ? 'active' : ''} aria-pressed={period === id} onClick={() => setPeriod(id)}>{label}</button>
+          ))}
         </div>
+      </div>
+      <div className="period-bar">
+        {stepLabel && <button type="button" className="step-btn" aria-label={`Previous ${stepLabel}`} onClick={() => setAnchor(a => shiftAnchor(period, a, -1))}>‹</button>}
+        {period === 'custom' ? (
+          <div className="custom-range">
+            <label>From <input type="date" value={custom.from} onChange={e => setCustom(c => ({ ...c, from: e.target.value }))} /></label>
+            <label>To <input type="date" value={custom.to} onChange={e => setCustom(c => ({ ...c, to: e.target.value }))} /></label>
+          </div>
+        ) : <span className="period-label">{range ? range.label : 'All time'}</span>}
+        {stepLabel && <button type="button" className="step-btn" aria-label={`Next ${stepLabel}`} onClick={() => setAnchor(a => shiftAnchor(period, a, 1))}>›</button>}
+        <span className="section-desc">{source === 'brands' ? `Bought deals${range ? ' with a purchase date' : ''}` : 'Split by buyer, from the Purchasing Log'}</span>
+      </div>
+      {rows.length === 0 ? <p className="section-note" style={{ marginTop: 12 }}>Nothing purchased in this period.</p> : (
+        <div className="pie-layout">
+          <div className="pie-box"><canvas ref={canvasRef} aria-label={`Pie chart of purchasing by ${source === 'brands' ? 'brand' : 'buyer'}`} role="img" /></div>
+          <div className="table-wrap" style={{ flex: '1 1 340px', minWidth: 0 }}>
+            <table>
+              <thead><tr><th>{source === 'brands' ? 'Brand' : 'Buyer / brand'}</th><th className="num">Purchasing</th><th className="num">Share</th>{source === 'brands' && <th className="num">Deals</th>}<th className="num">Profit</th><th className="num">ROI</th></tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.key}>
+                    <td className="strong" style={{ whiteSpace: 'nowrap' }}><span className="swatch" style={{ background: r.color, marginRight: 8 }} />{r.name}</td>
+                    <td className="num">{fmtMoney0(r.cost)}</td>
+                    <td className="num">{fmtPct(total ? r.cost / total : null)}</td>
+                    {source === 'brands' && <td className="num">{(r.n || 0).toLocaleString('en-US')}</td>}
+                    <td className="num">{fmtMoney0(r.profit)}</td>
+                    <td className="num">{fmtPct(r.cost ? r.profit / r.cost : null)}</td>
+                  </tr>
+                ))}
+                <tr className="total"><td>Total</td><td className="num">{fmtMoney0(total)}</td><td className="num">100%</td>{source === 'brands' && <td className="num">{rows.reduce((a, r) => a + (r.n || 0), 0).toLocaleString('en-US')}</td>}<td className="num">{fmtMoney0(rows.reduce((a, r) => a + r.profit, 0))}</td><td className="num">{fmtPct(total ? rows.reduce((a, r) => a + r.profit, 0) / total : null)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {source === 'buyers' && (
+        <p className="section-note" style={{ marginTop: 12, fontSize: 13, color: 'var(--muted)' }}>
+          Most purchases in this period have no Purchase Date on the sheet yet, so this shows the split by buyer. It switches to real brands once the manual tabs&apos; Purchase Date column is filled in.
+        </p>
       )}
     </section>
   );
