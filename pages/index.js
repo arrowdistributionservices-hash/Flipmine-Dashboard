@@ -296,7 +296,7 @@ function PurchasingSearchCard({ bySource }) {
   );
 }
 
-const BRAND_TILE_COLORS = { ARRIS: '#00e0a8', LEGO: '#ffb020', Google: '#4d7cff', Honeywell: '#e264ff', Mattel: '#ff4d6d', Hasbro: '#fb923c', 'Star Wars': '#22d3ee' };
+const BRAND_TILE_COLORS = { ARRIS: '#00e0a8', LEGO: '#ffb020', Google: '#4d7cff', Honeywell: '#e264ff', Mattel: '#ff4d6d', Hasbro: '#fb923c', 'Star Wars': '#22d3ee', DeWalt: '#facc15', Milwaukee: '#dc2626', Ninja: '#94a3b8', PoolGuard: '#a3e635' };
 
 function BrandBreakdownCard({ brands }) {
   const sortedByCost = [...brands].sort((a, b) => b.cost - a.cost);
@@ -305,7 +305,7 @@ function BrandBreakdownCard({ brands }) {
     <div className="card">
       <h3>Purchases by brand</h3>
       {brands.length === 0 ? (
-        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No branded deals matched yet (ARRIS, LEGO, Google, Honeywell).</p>
+        <p style={{ color: 'var(--muted)', fontSize: 12.5 }}>No branded deals matched yet.</p>
       ) : (
         <>
           {sortedByCost.map(b => (
